@@ -1908,15 +1908,28 @@ export class Compiler {
             if (!source) continue;
             const id = String(source.id ?? source._id ?? source.name ?? '');
             const idx = this.tableSlot(id);
-            const fields = Array.isArray(source.fields) ? source.fields.slice() : [];
-            const data = Array.isArray(source.data) ? source.data : [];
+            const fields = (Array.isArray(source.fields) && source.fields.length)
+                ? source.fields.slice()
+                : (Array.isArray(source.table) && Array.isArray(source.table[0]) ? source.table[0].slice() : []);
+            const rawRows = Array.isArray(source.data)
+                ? source.data
+                : (Array.isArray(source.origin)
+                    ? source.origin
+                    : (Array.isArray(source.rows)
+                        ? source.rows
+                        : (Array.isArray(source.table) ? source.table.slice(1) : [])));
             this.tables[idx] = {
                 id,
                 name: String(source.name ?? id),
-                fields,
-                rows: data.map((row) => {
-                    const values = row && Array.isArray(row.value) ? row.value : row;
-                    return Array.isArray(values) ? values.slice() : [];
+                fields: fields.map(String),
+                rows: rawRows.map((row) => {
+                    const values = row && Array.isArray(row.value) ? row.value : (Array.isArray(row) ? row : []);
+                    const out = values.map((val) => {
+                        const num = Number(val);
+                        return (val !== '' && !Number.isNaN(num) && Number.isFinite(num)) ? num : (val ?? '');
+                    });
+                    while (out.length < fields.length) out.push(0);
+                    return out;
                 }),
             };
         }

@@ -1238,11 +1238,16 @@ export class EniwanVM {
         return this.regTag[slot] === TAG_STR ? this.regStr[slot] : this.regNum[slot];
     }
 
-    /** 테이블 열 표기: 1, "1", A, B, AA를 모두 1-base 번호로 바꾼다. */
-    _tableColumn(value) {
+    /** 테이블 열 표기: 1, "1", A, B, AA 및 속성명을 모두 1-base 번호로 바꾼다. */
+    _tableColumn(value, table = null) {
         const number = Number(value);
         if (value !== '' && Number.isFinite(number)) return Math.trunc(number);
-        const text = String(value ?? '').trim().toUpperCase();
+        const str = String(value ?? '').trim();
+        if (table && Array.isArray(table.fields)) {
+            const fieldIdx = table.fields.indexOf(str);
+            if (fieldIdx !== -1) return fieldIdx + 1;
+        }
+        const text = str.toUpperCase();
         if (!/^[A-Z]+$/.test(text)) return 0;
         let column = 0;
         for (let i = 0; i < text.length; i += 1) column = column * 26 + text.charCodeAt(i) - 64;
@@ -1252,7 +1257,7 @@ export class EniwanVM {
     _tableValue(table, rowValue, colValue) {
         if (!table) return '';
         const rowNumber = Math.trunc(Number(rowValue));
-        const col = this._tableColumn(colValue) - 1;
+        const col = this._tableColumn(colValue, table) - 1;
         if (col < 0 || col >= table.fields.length) return '';
         // Entry 테이블의 1행은 속성명 머리글이고 실제 데이터는 2행부터다.
         if (rowNumber === 1) return table.fields[col] ?? '';
@@ -1261,15 +1266,15 @@ export class EniwanVM {
         return table.rows[row][col] ?? '';
     }
 
-    _tableCell(cell) {
+    _tableCell(cell, table = null) {
         const match = /^([A-Za-z]+)([1-9]\d*)$/.exec(String(cell ?? '').trim());
         if (!match) return null;
-        return { row: Number(match[2]), col: this._tableColumn(match[1]) };
+        return { row: Number(match[2]), col: this._tableColumn(match[1], table) };
     }
 
     _tableCalc(table, colValue, operation) {
         if (!table || !table.rows.length) return 0;
-        const col = this._tableColumn(colValue) - 1;
+        const col = this._tableColumn(colValue, table) - 1;
         if (col < 0 || col >= table.fields.length) return 0;
         const values = new Array(table.rows.length);
         let sum = 0;
@@ -1301,23 +1306,27 @@ export class EniwanVM {
 
     _tableCoefficient(table, firstColumn, secondColumn) {
         if (!table || !table.rows.length) return 0;
-        const x = this._tableColumn(firstColumn) - 1;
-        const y = this._tableColumn(secondColumn) - 1;
+        const x = this._tableColumn(firstColumn, table) - 1;
+        const y = this._tableColumn(secondColumn, table) - 1;
         if (x < 0 || y < 0 || x >= table.fields.length || y >= table.fields.length) return 0;
-        let count = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
-        for (const row of table.rows) {
-            const xv = Number(row[x]), yv = Number(row[y]);
-            if (!Number.isFinite(xv) || !Number.isFinite(yv)) continue;
-            count += 1; sx += xv; sy += yv; sxx += xv * xv; syy += yv * yv; sxy += xv * yv;
+        const n = table.rows.length;
+        let sum1 = 0, sum2 = 0, pow1 = 0, pow2 = 0, mulSum = 0;
+        for (let i = 0; i < n; i += 1) {
+            const xv = Number(table.rows[i][x]) || 0;
+            const yv = Number(table.rows[i][y]) || 0;
+            sum1 += xv; sum2 += yv;
+            pow1 += xv * xv; pow2 += yv * yv;
+            mulSum += xv * yv;
         }
-        const denominator = Math.sqrt((count * sxx - sx * sx) * (count * syy - sy * sy));
-        return count && denominator ? (count * sxy - sx * sy) / denominator : 0;
+        const dense = Math.sqrt((pow1 - (sum1 * sum1) / n) * (pow2 - (sum2 * sum2) / n));
+        if (dense === 0) return 0;
+        return Number(((mulSum - (sum1 * sum2) / n) / dense).toFixed(2));
     }
 
     _tableLookup(table, field, value, returnField) {
         if (!table) return '';
-        const search = this._tableColumn(field) - 1;
-        const result = this._tableColumn(returnField) - 1;
+        const search = this._tableColumn(field, table) - 1;
+        const result = this._tableColumn(returnField, table) - 1;
         if (search < 0 || result < 0 || search >= table.fields.length || result >= table.fields.length) return '';
         for (const row of table.rows) if (row[search] == value) return row[result] ?? '';
         return '';
@@ -2211,7 +2220,7 @@ export class EniwanVM {
                     const table = this.tables[a];
                     if (!table) break;
                     const rowNumber = Math.trunc(this._num(base + b));
-                    const col = this._tableColumn(this._regValue(base + b + 1)) - 1;
+                    const col = this._tableColumn(this._regValue(base + b + 1), table) - 1;
                     if (rowNumber === 1 && col >= 0 && col < table.fields.length) {
                         table.fields[col] = this._regValue(base + b + 2);
                         break;
@@ -2235,7 +2244,7 @@ export class EniwanVM {
                 case OP_TABLEDELETE: {
                     const table = this.tables[a];
                     if (!table) break;
-                    const index = Math.max(0, Math.trunc(this._num(base + b)) - 1);
+                    const index = Math.max(0, Math.trunc(this._num(base + b)) - (c ? 1 : 2));
                     const remove = op === OP_TABLEDELETE;
                     if (c) {
                         if (remove) {
@@ -2261,14 +2270,14 @@ export class EniwanVM {
                         this._regValue(base + c), this._regValue(base + c + 1)));
                     break;
                 case OP_TABLECELLGET: {
-                    const cell = this._tableCell(this._regValue(base + c));
+                    const cell = this._tableCell(this._regValue(base + c), this.tables[b]);
                     const value = cell ? this._tableValue(this.tables[b], cell.row, cell.col) : '';
                     this._loadListValue(base + a, value);
                     break;
                 }
                 case OP_TABLECELLSET: {
                     const table = this.tables[a];
-                    const cell = this._tableCell(this._regValue(base + b));
+                    const cell = this._tableCell(this._regValue(base + b), table);
                     if (!table || !cell) break;
                     const col = cell.col - 1;
                     const value = this._regValue(base + b + 1);

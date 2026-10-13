@@ -292,7 +292,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
     const coverLine = el('p', 'ev-cover-line', coverCard);
     coverLine.textContent = '작품을 불러오는 중…';
     const coverStats = el('div', 'ev-cover-stats', coverCard);
-    const coverNotice = el('div', 'ev-cover-notices', stageWrap);
+    const coverNotice = el('div', 'ev-cover-notices', coverCard);
     coverNotice.hidden = true;
     const coverOptions = el('div', 'ev-cover-options', coverCard);
     const goButton = el('button', 'ev-go', coverCard);

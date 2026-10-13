@@ -33,6 +33,7 @@ const SELECT_PROJECT = (extra = '') => `query SELECT_PROJECT($id: ID!, $groupId:
  * 거절당하면 장면 없이 한 번 더 묻는다 — 스키마가 바뀐 날 작품이 아예 안
  * 열리는 쪽보다, 장면 하나짜리로 도는 쪽이 낫다.
  */
+const OPTIONAL_FIELDS = '\n    scenes\n    tables';
 const SCENES_FIELD = '\n    scenes';
 
 /** 엔트리 자신의 csrf 방어. 이 헤더가 없으면 graphql이 "form tampered with"로 거절한다. */
@@ -72,10 +73,10 @@ async function ask(query, id, groupId, fetchImpl) {
 
 export async function fetchWork(id, groupId = null, { fetchImpl } = {}) {
     const doFetch = fetchImpl || ((...args) => fetch(...args));
-    let { work, failure } = await ask(SELECT_PROJECT(SCENES_FIELD), id, groupId, doFetch);
-    // 장면 필드 때문에 거절당했으면 그것만 빼고 다시 묻는다. 작품이 없거나
-    // 비공개여서 거절당한 경우에는 다시 물어도 같은 답이 오므로, 두 번째
-    // 응답의 실패 문구를 그대로 사람에게 보여 준다.
+    let { work, failure } = await ask(SELECT_PROJECT(OPTIONAL_FIELDS), id, groupId, doFetch);
+    if (!work && failure) {
+        ({ work, failure } = await ask(SELECT_PROJECT(SCENES_FIELD), id, groupId, doFetch));
+    }
     if (!work && failure) {
         ({ work, failure } = await ask(SELECT_PROJECT(), id, groupId, doFetch));
     }
