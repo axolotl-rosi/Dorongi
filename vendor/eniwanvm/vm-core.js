@@ -1437,27 +1437,6 @@ export class EniwanVM {
         return this.spriteAlphaHitTest ? this.spriteAlphaHitTest(e, x, y) : true;
     }
 
-    _entityCoversStage(e) {
-        const quad = this._entityCorners(e);
-        const contains = (x, y) => {
-            let positive = 0;
-            let negative = 0;
-            for (let index = 0; index < 4; index += 1) {
-                const next = (index + 1) % 4;
-                const ax = quad[index * 2];
-                const ay = quad[index * 2 + 1];
-                const bx = quad[next * 2];
-                const by = quad[next * 2 + 1];
-                const cross = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
-                if (cross > 1e-7) positive += 1;
-                else if (cross < -1e-7) negative += 1;
-            }
-            return positive === 0 || negative === 0;
-        };
-        return contains(-240, -135) && contains(240, -135)
-            && contains(240, 135) && contains(-240, 135);
-    }
-
     _quadsOverlap(left, right) {
         for (const quad of [left, right]) {
             for (let edge = 0; edge < 4; edge += 1) {
@@ -1483,10 +1462,11 @@ export class EniwanVM {
     _touching(e, targetObject) {
         if (!this.entAlive[e] || !this.entVisible[e]) return false;
         if (targetObject === -1) {
-            // 일부 DutScript 작품은 시작할 때 무대를 덮은 감지판이 마우스에
-            // 닿지 않는다는 런타임 지문으로 실행기를 구분한다. 실험 모드에서만
-            // 첫 논리 tick에 한해 그 지문을 재현하고, 이후 충돌은 정상 처리한다.
-            if (this.dutCompatibility && this.stats.ticks === 0 && this._entityCoversStage(e)) return false;
+            // 일부 DutScript 작품은 시작 직후의 "마우스에 닿았는가?" 결과로
+            // 실행기를 구분한다. 감지 오브젝트는 화면 크기일 수도, 아주 작을 수도
+            // 있으므로 실험 모드에서는 첫 논리 tick의 마우스 접촉을 모두 거짓으로
+            // 재현한다. 두 번째 tick부터는 크기와 관계없이 정상 충돌로 복귀한다.
+            if (this.dutCompatibility && this.stats.ticks === 0) return false;
             return this._pointTouchesEntity(e, this.host[HOST_MOUSE_X], this.host[HOST_MOUSE_Y]);
         }
         const own = this._entityCorners(e);
