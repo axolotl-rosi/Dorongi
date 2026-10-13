@@ -209,7 +209,8 @@ export class EniwanVM {
         // 한 틱이 무한 루프로 브라우저를 얼리는 걸 막는 상한. 넘으면 그 틱을
         // 중단하고 `overrun`을 올린다 — 조용히 멈추는 대신 숫자로 드러낸다.
         this.maxStepsPerTick = options.maxStepsPerTick || 4_000_000;
-        this.maxCallDepth = options.maxCallDepth || 64;
+        this.maxCallDepth = options.maxCallDepth || 2048;
+        this.workDeadline = 0;
 
         const frameSize = program.frameSize || 16;
         this.frameSize = frameSize;
@@ -1859,6 +1860,13 @@ export class EniwanVM {
                 this.stats.budgetPauses += 1;
                 break;
             }
+            if ((steps & 4095) === 0 && this.workDeadline > 0) {
+                const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                if (now >= this.workDeadline) {
+                    this.stats.budgetPauses += 1;
+                    break;
+                }
+            }
             steps += 1;
             const o = pc * INSTR_WORDS;
             const op = code[o];
@@ -2994,19 +3002,24 @@ export class EniwanVM {
         let ran = 0;
         let chunks = 0;
         const workStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        while ((this.tickInProgress || this.accumulatorMs >= step) && chunks < maxTicks) {
-            if (!this.tickInProgress) this.accumulatorMs -= step;
-            const result = this.runTickChunk();
-            if (result.complete) {
-                ran += 1;
-                // Give the renderer a presentation boundary. Starting another
-                // heavy tick here leaves tickInProgress=true and can hide the
-                // completed frame behind the partial-frame guard indefinitely.
-                if (stopAfterComplete) break;
+        this.workDeadline = Number.isFinite(maxWorkMs) && maxWorkMs > 0 ? workStarted + maxWorkMs : 0;
+        try {
+            while ((this.tickInProgress || this.accumulatorMs >= step) && chunks < maxTicks) {
+                if (!this.tickInProgress) this.accumulatorMs -= step;
+                const result = this.runTickChunk();
+                if (result.complete) {
+                    ran += 1;
+                    // Give the renderer a presentation boundary. Starting another
+                    // heavy tick here leaves tickInProgress=true and can hide the
+                    // completed frame behind the partial-frame guard indefinitely.
+                    if (stopAfterComplete) break;
+                }
+                chunks += 1;
+                const workNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                if (workNow - workStarted >= maxWorkMs) break;
             }
-            chunks += 1;
-            const workNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            if (workNow - workStarted >= maxWorkMs) break;
+        } finally {
+            this.workDeadline = 0;
         }
         if (this.accumulatorMs > step * maxTicks) this.accumulatorMs = 0;
         return ran;

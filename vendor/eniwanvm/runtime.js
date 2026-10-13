@@ -414,7 +414,7 @@ export class EniwanRuntime {
             // 만들지 않으면서 정점 123개를 재귀 순회하는 68ac...가 호출 사슬
             // 여유분을 넘겨 투영 배열을 완성하지 못한다. 512는 그 작품의
             // 재귀를 수용하면서도 clone-heavy 행의 레지스터 창을 유한하게 둔다.
-            maxCallDepth: this.program.usesClones ? 512 : 2048,
+            maxCallDepth: this.program.usesClones ? 1024 : 2048,
             nativeTier: this.nativeTier,
         });
         this.vm.tickMultiplier = this.turbo;
@@ -585,9 +585,9 @@ export class EniwanRuntime {
         // Five useful bands are easier to choose than eight nearly identical
         // ones. Level 3 is the default; 4 and 5 are for unusually large
         // recursive/3D projects. Wall-clock budgets keep input and paint alive.
-        const budgets = [80_000, 200_000, 500_000, 1_500_000, 4_000_000];
-        const catches = [4, 8, 12, 20, 28];
-        const workMs = [2.5, 4, 7, 12, 18];
+        const budgets = [80_000, 150_000, 300_000, 600_000, 1_200_000];
+        const catches = [6, 10, 16, 20, 24];
+        const workMs = [5, 8, 10, 13, 16];
         const i = Math.max(0, Math.min(budgets.length - 1, Math.round(Number(level) || 1) - 1));
         this.computeLevel = i + 1;
         this.stepBudget = budgets[i];
@@ -1184,7 +1184,10 @@ export class EniwanRuntime {
             const order = this.vm.drawOrder();
             this.spritePass.begin();
             drawLayeredScene(this.spritePass, this.vm, this.textures,
-                (objectIndex) => this._penLayer(objectIndex)?.tex, order);
+                (objectIndex) => {
+                    const layer = this._penLayer(objectIndex);
+                    return layer?.presentationTex || layer?.tex;
+                }, order);
             this.spritePass.end();
         }
     }
@@ -1315,7 +1318,10 @@ export class EniwanRuntime {
                 const order = this.vm.drawOrder();
                 this.spritePass.begin();
                 drawLayeredScene(this.spritePass, this.vm, this.textures,
-                    (objectIndex) => this._penLayer(objectIndex)?.tex, order);
+                    (objectIndex) => {
+                        const layer = this._penLayer(objectIndex);
+                        return layer?.presentationTex || layer?.tex;
+                    }, order);
                 this.spritePass.end();
                 this.lastDrawAt = now;
                 this.framesDrawn += 1;
@@ -1325,6 +1331,8 @@ export class EniwanRuntime {
             if (this.hooks.onPaint) this.hooks.onPaint();
             return;
         }
+
+        for (const layer of this.penLayers.values()) layer.commitCompleted?.();
 
         // 저연산 모드 렌더 조율 (예: 1단계 ~8fps, 2단계 ~13fps 페이싱):
         // 로직 틱은 정상적으로 돌리되, 사용자 입력 인터랙션 중이 아니고 minDrawGapMs가
@@ -1350,7 +1358,10 @@ export class EniwanRuntime {
             const order = this.vm.drawOrder();
             this.spritePass.begin();
             drawLayeredScene(this.spritePass, this.vm, this.textures,
-                previewPainted ? null : (objectIndex) => this._penLayer(objectIndex)?.tex,
+                previewPainted ? null : (objectIndex) => {
+                    const layer = this._penLayer(objectIndex);
+                    return layer?.presentationTex || layer?.tex;
+                },
                 order);
             this.spritePass.end();
 

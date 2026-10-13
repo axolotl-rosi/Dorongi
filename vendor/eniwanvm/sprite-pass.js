@@ -576,20 +576,26 @@ export class PenFramebuffer {
         this.gl = gl;
         this.fbo = null;
         this.tex = null;
+        this.completedTex = null;
+        this.erasedThisTick = false;
         this.depth = null;
         this.width = 0;
         this.height = 0;
     }
 
+    /** 렌더링에 노출할 텍스처. 이번 틱에서 지운 적이 있다면 틱이 끝날 때까지 이전 완성본을, 점진적 렌더러는 실시간 버퍼를 돌려준다. */
+    get presentationTex() {
+        if (this.erasedThisTick && this.completedTex) {
+            return this.completedTex;
+        }
+        return this.tex;
+    }
+
     /** 필요한 크기로 맞춘다. 다시 만들었으면 true(= 펜 내용이 사라졌다). */
     resize(width, height) {
-        // 전체화면 진입/해제 시 펜 버퍼가 날아가서 하얗게 보이지 않도록 모니터 최대 크기를 포함한 해상도를 보장하고
-        // 이미 할당된 버퍼 크기가 요청 크기를 수용할 수 있으면 기존 펜 내용을 보존한다.
-        const maxScreenW = typeof window !== 'undefined' ? Math.round((window.screen?.width || 1920) * Math.min(window.devicePixelRatio || 1, 2)) : 1920;
-        const maxScreenH = typeof window !== 'undefined' ? Math.round((window.screen?.height || 1080) * Math.min(window.devicePixelRatio || 1, 2)) : 1080;
-        const w = Math.max(1920, Math.max(maxScreenW, Math.floor(width)));
-        const h = Math.max(1080, Math.max(maxScreenH, Math.floor(height)));
-        if (this.fbo && this.width >= w && this.height >= h) return false;
+        const w = Math.floor(width);
+        const h = Math.floor(height);
+        if (this.fbo && this.width === w && this.height === h) return false;
         this.dispose();
         const gl = this.gl;
         this.width = w;
@@ -629,6 +635,9 @@ export class PenFramebuffer {
 
     /** 펜 모두 지우기. **투명**으로 지운다 — 배경색으로 지우면 합성할 때 모양을 덮는다. */
     clear() {
+        // 지우기 직전 완성본을 백업하여 깜빡임을 방지한다.
+        this.commitCompleted();
+        this.erasedThisTick = true;
         const gl = this.gl;
         this.bind();
         gl.disable(gl.SCISSOR_TEST);
@@ -637,13 +646,36 @@ export class PenFramebuffer {
         this.unbind();
     }
 
+    /** 틱이 끝났을 때 완전한 프레임을 보존해 틱 진행 중 깜빡임을 막는다. */
+    commitCompleted() {
+        const gl = this.gl;
+        if (!gl || !this.fbo || !this.width || !this.height || typeof gl.copyTexSubImage2D !== 'function') return;
+        if (!this.completedTex) {
+            this.completedTex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, this.completedTex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.width, this.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        }
+        this.bind();
+        gl.bindTexture(gl.TEXTURE_2D, this.completedTex);
+        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, this.width, this.height);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        this.unbind();
+        this.erasedThisTick = false;
+    }
+
     dispose() {
         const gl = this.gl;
         if (this.fbo) gl.deleteFramebuffer(this.fbo);
         if (this.tex) gl.deleteTexture(this.tex);
+        if (this.completedTex) gl.deleteTexture(this.completedTex);
         if (this.depth) gl.deleteRenderbuffer(this.depth);
         this.fbo = null;
         this.tex = null;
+        this.completedTex = null;
         this.depth = null;
     }
 }

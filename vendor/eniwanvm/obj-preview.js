@@ -243,8 +243,7 @@ export class ObjPreviewRenderer {
     }
 
     needsPreview(vm = null) {
-        return this.dragging || this.suppressionActiveForTick
-            || this.awaitingCleanFrame || Boolean(vm?.tickInProgress);
+        return Boolean(this.dragging || this.suppressionActiveForTick || this.awaitingCleanFrame);
     }
 
     sync(vm) {
