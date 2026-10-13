@@ -332,6 +332,7 @@ export class EniwanRuntime {
         this.compileMs = 0;
         this.filename = '';
         this.tessCompatibilityMode = 'auto';
+        this.dutCompatibility = false;
         this.tessScrollPending = false;
 
         this.running = false;
@@ -620,6 +621,11 @@ export class EniwanRuntime {
             || (this.tessCompatibilityMode === 'auto' && this.program?.usesTessVM === true);
         this.vm.tessCompatibility = enabled;
         this.vm.host[HOST_IS_TESSVM] = enabled ? 1 : 0;
+    }
+
+    setDutCompatibility(enabled = false) {
+        this.dutCompatibility = enabled === true;
+        if (this.vm) this.vm.dutCompatibility = this.dutCompatibility;
     }
 
     setKey(code, down) {

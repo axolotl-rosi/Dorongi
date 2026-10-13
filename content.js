@@ -34,6 +34,7 @@ const DEFAULTS = {
     touchMode: 'auto',
     renderMode: 'auto',
     tessMode: 'auto',
+    dutMode: false,
     diagnostics: false,
     volume: 100,
 };
@@ -52,6 +53,7 @@ function sanitizeSettings(raw) {
         touchMode: pick(source.touchMode, ['auto', 'on', 'off'], 'auto'),
         renderMode: pick(source.renderMode, ['auto', '60', '120', 'max'], 'auto'),
         tessMode: pick(source.tessMode, ['auto', 'on', 'off'], 'auto'),
+        dutMode: source.dutMode === true,
         diagnostics: source.diagnostics === true,
         volume: Math.max(0, Math.min(100, Math.round(Number(source.volume ?? 100)))),
     };
@@ -308,6 +310,7 @@ api.storage.onChanged.addListener((changes, area) => {
     if ('touchMode' in changes) settings.touchMode = sanitizeSettings({ touchMode: changes.touchMode.newValue }).touchMode;
     if ('renderMode' in changes) settings.renderMode = sanitizeSettings({ renderMode: changes.renderMode.newValue }).renderMode;
     if ('tessMode' in changes) settings.tessMode = sanitizeSettings({ tessMode: changes.tessMode.newValue }).tessMode;
+    if ('dutMode' in changes) settings.dutMode = changes.dutMode.newValue === true;
     if ('diagnostics' in changes) settings.diagnostics = changes.diagnostics.newValue === true;
     if ('volume' in changes) settings.volume = Math.max(0,
         Math.min(100, Math.round(Number(changes.volume.newValue ?? 100))));

@@ -397,6 +397,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         renderMode: ['auto', '60', '120', 'max'].includes(settings.renderMode)
             ? settings.renderMode : 'auto',
         tessMode: ['auto', 'on', 'off'].includes(settings.tessMode) ? settings.tessMode : 'auto',
+        dutMode: settings.dutMode === true,
         diagnostics: settings.diagnostics === true,
         volume: Math.max(0, Math.min(100, Math.round(Number(settings.volume ?? 100)))),
     };
@@ -422,6 +423,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             touchMode: current.touchMode,
             renderMode: current.renderMode,
             tessMode: current.tessMode,
+            dutMode: current.dutMode,
             diagnostics: current.diagnostics,
             volume: current.volume,
         },
@@ -519,7 +521,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
     fullSettingsButton.type = 'button';
     fullSettingsButton.textContent = '전체화면 전환';
 
-    const environmentSettings = settingsSection('환경 설정', 'Entry·기기·터치·TessVM 실행 환경');
+    const environmentSettings = settingsSection('환경 설정', 'Entry·기기·터치 실행 환경');
     const boostToggle = settingToggle(environmentSettings, 'Entry 부스터 모드로 보고',
         '작품에 환경값만 전달하며 Dorongi 자체 속도에는 영향을 주지 않습니다.',
         current.boostMode, (value) => {
@@ -544,7 +546,8 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             persistSettings();
         });
 
-    const tessModeSelect = settingSelect(environmentSettings, 'TessVM 호환성 설정',
+    const experimentalSettings = settingsSection('실험적 기능', '다른 실행기의 런타임 지문 호환');
+    const tessModeSelect = settingSelect(experimentalSettings, 'TessVM 호환성 설정',
         '예약 변수, 포인터 델타, 스크롤 값과 $SCROLL 신호를 TessVM 방식으로 연결합니다.',
         [['auto', '자동 감지'], ['on', '항상 사용'], ['off', '사용 안 함']],
         current.tessMode, (value) => {
@@ -553,7 +556,14 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             persistSettings();
             if (runtime?.program) configureEnvironmentNotices(runtime.program);
         });
-    const forceToggle = settingToggle(environmentSettings, '미지원 블록 무시하고 강행',
+    const dutModeToggle = settingToggle(experimentalSettings, 'DutScript 호환 모드',
+        'HEX 반환 형식과 시작 직후 마우스 충돌 판정을 DutScript 작품의 감지 방식에 맞춥니다.',
+        current.dutMode, (value) => {
+            current.dutMode = value;
+            runtime?.setDutCompatibility(value);
+            persistSettings();
+        });
+    const forceToggle = settingToggle(experimentalSettings, '미지원 블록 무시하고 강행',
         '옮기지 못한 블록을 제외하므로 작품 결과가 달라질 수 있습니다.',
         current.force === true, (value) => {
             current.force = value;
@@ -688,6 +698,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         current.touchMode = 'auto';
         current.boostMode = false;
         current.tessMode = 'auto';
+        current.dutMode = false;
         current.diagnostics = false;
         current.volume = 100;
         settingsCompute.value = '0';
@@ -704,12 +715,14 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         paintCoverBoost();
         forceToggle.checked = false;
         tessModeSelect.value = 'auto';
+        dutModeToggle.checked = false;
         root.classList.remove('show-diagnostics');
         runtime?.setComputeLevel(current.computeLevel);
         runtime?.setTurbo(1);
         runtime?.setVolume?.(100);
         applyEnvironment();
         runtime?.setTessCompatibility('auto');
+        runtime?.setDutCompatibility(false);
         applyRenderMode();
         computeSelect?.select(current.computeLevel);
         speedSelect?.select(1);
@@ -1438,6 +1451,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
 
         const { analysis, program, compileMs } = result;
         runtime.setTessCompatibility(current.tessMode);
+        runtime.setDutCompatibility(current.dutMode);
         applyEnvironment();
         applyRenderMode();
         configureEnvironmentNotices(program);
@@ -1572,6 +1586,8 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             paintCoverBoost();
             current.tessMode = next.tessMode;
             tessModeSelect.value = current.tessMode;
+            current.dutMode = next.dutMode === true;
+            dutModeToggle.checked = current.dutMode;
             current.diagnostics = next.diagnostics === true;
             diagnosticsToggle.checked = current.diagnostics;
             root.classList.toggle('show-diagnostics', current.diagnostics);
@@ -1586,6 +1602,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             forceToggle.checked = current.force === true;
             applyEnvironment();
             runtime?.setTessCompatibility(current.tessMode);
+            runtime?.setDutCompatibility(current.dutMode);
         },
 
         dispose() {

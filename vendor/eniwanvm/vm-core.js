@@ -270,6 +270,8 @@ export class EniwanVM {
 
         this.host = new Float64Array(HOST_SLOTS);
         this.tessCompatibility = false;
+        // 선택형 실험 기능. 일반 실행에서는 Entry의 반환값과 충돌 의미론을 유지한다.
+        this.dutCompatibility = false;
         this.hostReadCounts = new Uint32Array(HOST_SLOTS);
         // 문자 슬롯(클립보드·커서). 숫자 슬롯과 번호를 공유하고, 어느 쪽을 보는지는
         // `HOST_IS_STRING`이 가른다.
@@ -1435,6 +1437,27 @@ export class EniwanVM {
         return this.spriteAlphaHitTest ? this.spriteAlphaHitTest(e, x, y) : true;
     }
 
+    _entityCoversStage(e) {
+        const quad = this._entityCorners(e);
+        const contains = (x, y) => {
+            let positive = 0;
+            let negative = 0;
+            for (let index = 0; index < 4; index += 1) {
+                const next = (index + 1) % 4;
+                const ax = quad[index * 2];
+                const ay = quad[index * 2 + 1];
+                const bx = quad[next * 2];
+                const by = quad[next * 2 + 1];
+                const cross = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+                if (cross > 1e-7) positive += 1;
+                else if (cross < -1e-7) negative += 1;
+            }
+            return positive === 0 || negative === 0;
+        };
+        return contains(-240, -135) && contains(240, -135)
+            && contains(240, 135) && contains(-240, 135);
+    }
+
     _quadsOverlap(left, right) {
         for (const quad of [left, right]) {
             for (let edge = 0; edge < 4; edge += 1) {
@@ -1460,6 +1483,10 @@ export class EniwanVM {
     _touching(e, targetObject) {
         if (!this.entAlive[e] || !this.entVisible[e]) return false;
         if (targetObject === -1) {
+            // 일부 DutScript 작품은 시작할 때 무대를 덮은 감지판이 마우스에
+            // 닿지 않는다는 런타임 지문으로 실행기를 구분한다. 실험 모드에서만
+            // 첫 논리 tick에 한해 그 지문을 재현하고, 이후 충돌은 정상 처리한다.
+            if (this.dutCompatibility && this.stats.ticks === 0 && this._entityCoversStage(e)) return false;
             return this._pointTouchesEntity(e, this.host[HOST_MOUSE_X], this.host[HOST_MOUSE_Y]);
         }
         const own = this._entityCorners(e);
@@ -2099,7 +2126,8 @@ export class EniwanVM {
                     const r = this._num(base + b) << 16;
                     const g = this._num(base + b + 1) << 8;
                     const blue = this._num(base + b + 2);
-                    this._setStr(base + a, `#${((1 << 24) + r + g + blue).toString(16).slice(1)}`);
+                    const value = `#${((1 << 24) + r + g + blue).toString(16).slice(1)}`;
+                    this._setStr(base + a, this.dutCompatibility ? value.toUpperCase() : value);
                     break;
                 }
                 case OP_HEXRGB: {

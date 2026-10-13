@@ -46,6 +46,7 @@ function sanitizeSettings(raw) {
         touchMode: pick(s.touchMode, ['auto', 'on', 'off'], 'auto'),
         renderMode: pick(s.renderMode, ['auto', '60', '120', 'max'], 'auto'),
         tessMode: pick(s.tessMode, ['auto', 'on', 'off'], 'auto'),
+        dutMode: s.dutMode === true,
         diagnostics: s.diagnostics === true,
         volume: Number.isFinite(Number(s.volume))
             ? Math.max(0, Math.min(100, Math.round(Number(s.volume)))) : 100,
