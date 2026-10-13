@@ -53,6 +53,8 @@ import {
     OP_STRETCH, OP_RESETSCALE, OP_RANDOMCOLOR, OP_RGBHEX, OP_HEXRGB,
     OP_SETVARVISIBLE, OP_STRCOUNT, OP_ISTYPE, OP_DISTANCE, OP_TOUCHING,
     OP_MOVEANGLE, OP_BOUNCE, OP_TURNTIME,
+    OP_TABLECOEFF, OP_TABLELOOKUP, OP_OBJECTCLICKED, OP_POINTTO,
+    OP_BGM, OP_STOPBGM, OP_BROADCASTWAIT, OP_NEIGHBORSCENE, OP_TABLEVISIBLE,
     OP_SUB_LL, OP_MUL_LL, OP_DIV_LL, OP_MOD_LL, OP_QUOT_LL,
     OP_LT_LL, OP_GT_LL, OP_LE_LL, OP_GE_LL, OP_LISTGET_L, OP_LISTSET_LL,
     DATE_YEAR, DATE_MONTH, DATE_DAY, DATE_HOUR, DATE_MINUTE, DATE_SECOND, DATE_DAY_OF_WEEK,
@@ -262,6 +264,8 @@ export class EniwanVM {
         this.listVisible = new Uint8Array(program.lists.length);
         this.listVersions = new Uint32Array(program.lists.length);
         this.tables = [];
+        this.tableVisible = new Int8Array((program.tables || []).length);
+        this.clickedObject = -1;
 
         this.host = new Float64Array(HOST_SLOTS);
         this.tessCompatibility = false;
@@ -444,6 +448,7 @@ export class EniwanVM {
         this.rowTurnFrames = new Int32Array(cap).fill(-1);
         // 묻고 기다리기 — 대답이 올 때까지 **이 줄만** 멈춘다.
         this.rowAwaitAnswer = new Uint8Array(cap);
+        this.rowBroadcastMessage = new Int32Array(cap).fill(-1);
         // 한 논리 틱을 여러 화면 프레임에 나눌 때 이미 끝난 줄을 표시한다.
         this.rowTickDone = new Uint8Array(cap);
     }
@@ -464,6 +469,7 @@ export class EniwanVM {
             rowGlideFrames: this.rowGlideFrames,
             rowTurnStep: this.rowTurnStep, rowTurnFrames: this.rowTurnFrames,
             rowAwaitAnswer: this.rowAwaitAnswer,
+            rowBroadcastMessage: this.rowBroadcastMessage,
         };
         const cap = this.rowCapacity * 2;
         this._allocRows(cap);
@@ -486,6 +492,7 @@ export class EniwanVM {
         this.rowTurnStep.set(old.rowTurnStep);
         this.rowTurnFrames.set(old.rowTurnFrames);
         this.rowAwaitAnswer.set(old.rowAwaitAnswer);
+        this.rowBroadcastMessage.set(old.rowBroadcastMessage);
         this.rowCapacity = cap;
     }
 
@@ -615,6 +622,8 @@ export class EniwanVM {
             fields: (table.fields || []).slice(),
             rows: (table.rows || []).map((row) => row.slice()),
         }));
+        this.tableVisible.fill(0);
+        this.clickedObject = -1;
 
         this.alive.fill(0);
         this.rowSleep.fill(0);
@@ -622,6 +631,7 @@ export class EniwanVM {
         this.rowGlideFrames.fill(-1);
         this.rowTurnFrames.fill(-1);
         this.rowAwaitAnswer.fill(0);
+        this.rowBroadcastMessage.fill(-1);
         this.rowTickDone.fill(0);
         this.rowCount = this.scriptCount;
         this._inTick = false;
@@ -1285,6 +1295,30 @@ export class EniwanVM {
             }
             default: return 0;
         }
+    }
+
+    _tableCoefficient(table, firstColumn, secondColumn) {
+        if (!table || !table.rows.length) return 0;
+        const x = this._tableColumn(firstColumn) - 1;
+        const y = this._tableColumn(secondColumn) - 1;
+        if (x < 0 || y < 0 || x >= table.fields.length || y >= table.fields.length) return 0;
+        let count = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+        for (const row of table.rows) {
+            const xv = Number(row[x]), yv = Number(row[y]);
+            if (!Number.isFinite(xv) || !Number.isFinite(yv)) continue;
+            count += 1; sx += xv; sy += yv; sxx += xv * xv; syy += yv * yv; sxy += xv * yv;
+        }
+        const denominator = Math.sqrt((count * sxx - sx * sx) * (count * syy - sy * sy));
+        return count && denominator ? (count * sxy - sx * sy) / denominator : 0;
+    }
+
+    _tableLookup(table, field, value, returnField) {
+        if (!table) return '';
+        const search = this._tableColumn(field) - 1;
+        const result = this._tableColumn(returnField) - 1;
+        if (search < 0 || result < 0 || search >= table.fields.length || result >= table.fields.length) return '';
+        for (const row of table.rows) if (row[search] == value) return row[result] ?? '';
+        return '';
     }
 
     // ── 그리기 ─────────────────────────────────────────────────────────
@@ -2241,6 +2275,18 @@ export class EniwanVM {
                     }
                     break;
                 }
+                case OP_TABLECOEFF:
+                    this._setNum(base + a, this._tableCoefficient(this.tables[b],
+                        this._regValue(base + c), this._regValue(base + c + 1)));
+                    break;
+                case OP_TABLELOOKUP:
+                    this._loadListValue(base + a, this._tableLookup(this.tables[b],
+                        this._regValue(base + c), this._regValue(base + c + 1),
+                        this._regValue(base + c + 2)));
+                    break;
+                case OP_TABLEVISIBLE:
+                    if (a >= 0 && a < this.tableVisible.length) this.tableVisible[a] = b;
+                    break;
 
                 case OP_PENDOWN: this.pen.down = true; break;
                 case OP_PENUP: this.pen.down = false; break;
@@ -2586,6 +2632,18 @@ export class EniwanVM {
                     this.sink.sound(4, null, this.volume, '', 0, 0, -1, this.soundSpeed);
                     break;
                 }
+                case OP_BGM: {
+                    const object = this.objects[this.entObject[ent]];
+                    const sounds = object ? object.sounds : [];
+                    const index = a >= 0 ? a : this._resolveAsset(sounds, this._regValue(base + b));
+                    const sound = index >= 0 ? sounds[index] : null;
+                    if (sound) this.sink.sound(5, sound.src, this.volume, sound.name, 0, 0,
+                        this.entObject[ent], this.soundSpeed);
+                    break;
+                }
+                case OP_STOPBGM:
+                    this.sink.sound(6, null, this.volume, '', 0, 0, -1, this.soundSpeed);
+                    break;
                 case OP_STOP: {
                     // Entry's `thisThread` calls scope.die(). Inside a custom
                     // block that ends only the current function scope; the
@@ -2632,6 +2690,25 @@ export class EniwanVM {
                     // 쪽 스레드 안에서 받는 쪽이 돌아 순서가 뒤집힌다.
                     this.wake('when_message_cast', -1, a);
                     break;
+                case OP_BROADCASTWAIT: {
+                    if (this.rowBroadcastMessage[ti] < 0) {
+                        this.rowBroadcastMessage[ti] = a;
+                        this.wake('when_message_cast', -1, a);
+                    }
+                    let waiting = false;
+                    for (let row = 0; row < this.rowCount; row += 1) {
+                        if (row === ti || !this.alive[row]) continue;
+                        const thread = this.program.threads[this.rowScript[row]];
+                        if (thread?.event === 'when_message_cast' && thread.arg === a) { waiting = true; break; }
+                    }
+                    if (waiting) {
+                        this.pc[ti] = pc - 1;
+                        this.base[ti] = base;
+                        return steps;
+                    }
+                    this.rowBroadcastMessage[ti] = -1;
+                    break;
+                }
 
                 // ── 문자·리스트 ───────────────────────────────────────
                 case OP_INLIST: {
@@ -2675,6 +2752,18 @@ export class EniwanVM {
                 case OP_TOUCHING:
                     this._setNum(base + a, this._touching(ent, b) ? 1 : 0);
                     break;
+                case OP_OBJECTCLICKED:
+                    this._setNum(base + a, this.clickedObject >= 0
+                        && this.entObject[ent] === this.clickedObject ? 1 : 0);
+                    break;
+                case OP_POINTTO: {
+                    const targetX = a < 0 ? this.host[HOST_MOUSE_X] : this.entX[a];
+                    const targetY = a < 0 ? this.host[HOST_MOUSE_Y] : this.entY[a];
+                    const dx = targetX - this.entX[ent], dy = targetY - this.entY[ent];
+                    if (dx !== 0 || dy !== 0) this._setDirection(ent,
+                        ((-Math.atan2(dy, dx) * 180 / Math.PI + 90) % 360 + 360) % 360);
+                    break;
+                }
                 case OP_STRIDX: {
                     // 엔트리는 **1부터** 세고, 없으면 0이다.
                     const hay = this._str(base + b);
@@ -2824,6 +2913,13 @@ export class EniwanVM {
                     this.pc[ti] = pc;
                     this.base[ti] = base;
                     return steps;
+                case OP_NEIGHBORSCENE: {
+                    const next = this.sceneIndex + (a < 0 ? -1 : 1);
+                    if (next >= 0 && next < this.scenes.length) this.startScene(next);
+                    this.pc[ti] = pc;
+                    this.base[ti] = base;
+                    return steps;
+                }
 
                 case OP_YIELD:
                     this.pc[ti] = pc;

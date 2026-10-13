@@ -372,6 +372,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
     let coverCompute = null;
     let coverTurbo = null;
     let variableMonitors = [];
+    let tableMonitors = [];
     let autoOverloadSamples = 0;
     let autoSevereSamples = 0;
     const bubbleNodes = new Map();
@@ -869,6 +870,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         paintTexts();
         paintBubbles();
         paintVariableMonitors();
+        paintTableMonitors();
     }
 
     function showAsk(question) {
@@ -925,6 +927,38 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             el('span', 'ev-variable-name', monitor).textContent = def.name;
             const valueNode = el('span', 'ev-variable-value', monitor);
             variableMonitors.push({ def, monitor, valueNode, last: null });
+        }
+    }
+
+    function buildTableMonitors(tables) {
+        tableMonitors = [];
+        for (const [index, source] of (tables || []).entries()) {
+            if (!source) continue;
+            const monitor = el('div', 'ev-variable is-list is-table', variableLayer);
+            monitor.hidden = true;
+            monitor.style.left = '8%';
+            monitor.style.top = `${12 + (index % 3) * 8}%`;
+            el('span', 'ev-variable-name', monitor).textContent = String(source.name || source.id || '테이블');
+            const valueNode = el('span', 'ev-variable-value', monitor);
+            tableMonitors.push({ index, monitor, valueNode, last: null });
+        }
+    }
+
+    function paintTableMonitors() {
+        for (const item of tableMonitors) {
+            const mode = runtime?.vm?.tableVisible?.[item.index] || 0;
+            item.monitor.hidden = !mode;
+            if (!mode) continue;
+            const table = runtime.vm.tables[item.index];
+            if (!table) continue;
+            const lines = [table.fields.join(' | ')];
+            for (let i = 0; i < table.rows.length && i < 20; i += 1) {
+                lines.push(table.rows[i].slice(0, 12).join(' | '));
+            }
+            if (table.rows.length > 20) lines.push(`… 외 ${table.rows.length - 20}행`);
+            const value = lines.join('\n');
+            if (value !== item.last) { item.last = value; item.valueNode.textContent = value; }
+            item.monitor.classList.toggle('is-chart', mode === 2);
         }
     }
 
@@ -1387,6 +1421,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
     async function bootProject(project, label, thumb) {
         normalizeProject(project);
         buildVariableMonitors(project.variables);
+        buildTableMonitors(project.tables);
         coverLine.textContent = 'Dorongi로 옮기는 중…';
         await nextFrame();
         if (disposed) return;

@@ -48,6 +48,8 @@ import {
     OP_STRETCH, OP_RESETSCALE, OP_RANDOMCOLOR, OP_RGBHEX, OP_HEXRGB,
     OP_SETVARVISIBLE, OP_STRCOUNT, OP_ISTYPE, OP_DISTANCE, OP_TOUCHING,
     OP_MOVEANGLE, OP_BOUNCE, OP_TURNTIME,
+    OP_TABLECOEFF, OP_TABLELOOKUP, OP_OBJECTCLICKED, OP_POINTTO,
+    OP_BGM, OP_STOPBGM, OP_BROADCASTWAIT, OP_NEIGHBORSCENE, OP_TABLEVISIBLE,
     OP_SUB_LL, OP_MUL_LL, OP_DIV_LL, OP_MOD_LL, OP_QUOT_LL,
     OP_LT_LL, OP_GT_LL, OP_LE_LL, OP_GE_LL, OP_LISTGET_L, OP_LISTSET_LL,
     DATE_YEAR, DATE_MONTH, DATE_DAY, DATE_HOUR, DATE_MINUTE, DATE_SECOND, DATE_DAY_OF_WEEK,
@@ -221,6 +223,16 @@ const LOCAL_BINARY_OPS = new Map([
 
 function isBlock(node) {
     return node && typeof node === 'object' && typeof node.type === 'string';
+}
+
+/** Entry가 실행 블록 수에 포함하는 직렬화 블록을 재귀적으로 센다. */
+function serializedBlockCount(value) {
+    if (Array.isArray(value)) return value.reduce((n, item) => n + serializedBlockCount(item), 0);
+    if (!isBlock(value)) return 0;
+    let count = 1;
+    for (const param of value.params || []) count += serializedBlockCount(param);
+    for (const body of value.statements || []) count += serializedBlockCount(body);
+    return count;
 }
 
 /**
@@ -832,6 +844,44 @@ export class Compiler {
                 em.emit(OP_TABLECELLGET, r, this.tableSlot(p[0]), cell);
                 return r;
             }
+            case 'get_coefficient': {
+                const args = scope.next;
+                scope.alloc(); scope.alloc();
+                const first = this.expr(p[1], scope);
+                const second = this.expr(p[2], scope);
+                if (first !== args) em.emit(OP_MOV, args, first);
+                if (second !== args + 1) em.emit(OP_MOV, args + 1, second);
+                const r = scope.alloc();
+                em.emit(OP_TABLECOEFF, r, this.tableSlot(p[0]), args);
+                return r;
+            }
+            case 'get_value_v_lookup': {
+                const args = scope.next;
+                scope.alloc(); scope.alloc(); scope.alloc();
+                const field = this.expr(p[1], scope);
+                const value = this.expr(p[2], scope);
+                const resultField = this.expr(p[3], scope);
+                if (field !== args) em.emit(OP_MOV, args, field);
+                if (value !== args + 1) em.emit(OP_MOV, args + 1, value);
+                if (resultField !== args + 2) em.emit(OP_MOV, args + 2, resultField);
+                const r = scope.alloc();
+                em.emit(OP_TABLELOOKUP, r, this.tableSlot(p[0]), args);
+                return r;
+            }
+            case 'get_block_count': {
+                const key = String(p[0] ?? 'all');
+                let objects = this.project.objects || [];
+                if (key === 'self') objects = objects.slice(this.currentObject, this.currentObject + 1);
+                else if (key.startsWith('object-')) {
+                    const id = key.slice(7);
+                    objects = objects.filter((object) => object.id === id);
+                } else if (key.startsWith('scene-')) {
+                    const id = key.slice(6);
+                    const sceneIndex = this.stage.scenes.findIndex((scene) => scene.id === id);
+                    objects = objects.filter((object) => (object.sceneIndex || 0) === sceneIndex);
+                } else if (key !== 'all') objects = [];
+                return this.expr(objects.reduce((n, object) => n + serializedBlockCount(object.script || []), 0), scope);
+            }
             case 'coordinate_mouse': {
                 // params: [_, 축, _] — VALUE:1
                 const r = scope.alloc();
@@ -876,6 +926,11 @@ export class Compiler {
             case 'is_clicked': {
                 const r = scope.alloc();
                 em.emit(OP_LOADHOST, r, HOST_MOUSE_DOWN);
+                return r;
+            }
+            case 'is_object_clicked': {
+                const r = scope.alloc();
+                em.emit(OP_OBJECTCLICKED, r);
                 return r;
             }
             case 'is_boost_mode': {
@@ -976,7 +1031,9 @@ export class Compiler {
         // 값 반환 함수 호출
         if (type.startsWith('func_')) return this.call(node, scope, true);
 
-        this.note(type);
+        // 요청 범위 밖의 확장/AI/하드웨어 블록은 유령 reporter다. 값 자리에는
+        // Entry의 빈 reporter처럼 0을 남기고, 작품의 나머지 실행은 계속한다.
+        this.ignore(type);
         return this.expr(0, scope);
     }
 
@@ -1172,12 +1229,14 @@ export class Compiler {
                     this.tableSlot(p[0]), index, property);
                 break;
             }
-            // 저장 및 표/차트 열기는 편집기 UI다. 계산 상태는 이미 VM에 남는다.
             case 'save_current_table':
+                this.ignore(type);
+                break;
             case 'open_table':
             case 'open_table_chart':
             case 'close_table_chart':
-                this.ignore(type);
+                em.emit(OP_TABLEVISIBLE, this.tableSlot(p[0]),
+                    type === 'open_table' ? 1 : type === 'open_table_chart' ? 2 : 0);
                 break;
             case 'open_table_wait': {
                 this.ignore('open_table_wait:ui');
@@ -1577,6 +1636,15 @@ export class Compiler {
             case 'sound_silent_all':
                 em.emit(OP_STOPSOUND, String(p[0] ?? 'all') === 'thisOnly' ? 1 : 0);
                 break;
+            case 'play_bgm': {
+                const idx = this._assetIndex(p[0], this._sounds);
+                const name = idx >= 0 ? scope.alloc() : this.expr(p[0], scope);
+                em.emit(OP_BGM, idx, name);
+                break;
+            }
+            case 'stop_bgm':
+                em.emit(OP_STOPBGM);
+                break;
             case 'sound_volume_set':
             case 'sound_volume_change': {
                 const src = this.expr(p[0], scope);
@@ -1593,6 +1661,9 @@ export class Compiler {
                 em.emit(OP_BROADCAST, this.messageSlot(p[0]));
                 break;
             }
+            case 'message_cast_wait':
+                em.emit(OP_BROADCASTWAIT, this.messageSlot(p[0]));
+                break;
 
             // ── 무대·장면·대화·질문 ───────────────────────────────────
             // 여기부터는 "엔트리에 맡기면 되는" 블록들이 아니다. 한 블록이라도
@@ -1615,6 +1686,45 @@ export class Compiler {
                 if (idx < 0 && this.stage.scenes.length === 1) idx = 0;
                 if (idx < 0) { this.note(`${type}:${p[0]}`); break; }
                 em.emit(OP_STARTSCENE, idx);
+                break;
+            }
+            case 'start_neighbor_scene':
+                em.emit(OP_NEIGHBORSCENE, String(p[0] ?? 'next') === 'prev' ? -1 : 1);
+                break;
+            case 'locate':
+            case 'see_angle_object': {
+                const target = String(p[0] ?? 'mouse');
+                let objectIndex = -1;
+                if (target !== 'mouse') {
+                    objectIndex = this.stage.objects.findIndex((o) => o.id === target || o.name === target);
+                    if (objectIndex < 0) { this.ignore(type); break; }
+                }
+                if (type === 'see_angle_object') em.emit(OP_POINTTO, objectIndex);
+                else if (objectIndex < 0) {
+                    const x = scope.alloc(), y = scope.alloc();
+                    em.emit(OP_LOADHOST, x, HOST_MOUSE_X);
+                    em.emit(OP_LOADHOST, y, HOST_MOUSE_Y);
+                    em.emit(OP_LOCATEXY, x, y);
+                } else {
+                    const x = scope.alloc(), y = scope.alloc();
+                    em.emit(OP_LOADENT, x, ENT_X, objectIndex);
+                    em.emit(OP_LOADENT, y, ENT_Y, objectIndex);
+                    em.emit(OP_LOCATEXY, x, y);
+                }
+                break;
+            }
+            case 'move_xy_time': {
+                const slot = scope.next;
+                scope.alloc(); scope.alloc(); scope.alloc();
+                const currentX = scope.alloc(), currentY = scope.alloc();
+                em.emit(OP_LOADENT, currentX, ENT_X, -1);
+                em.emit(OP_LOADENT, currentY, ENT_Y, -1);
+                const dx = this.expr(p[1], scope), dy = this.expr(p[2], scope);
+                em.emit(OP_ADD, slot, currentX, dx);
+                em.emit(OP_ADD, slot + 1, currentY, dy);
+                const sec = this.expr(p[0], scope);
+                if (sec !== slot + 2) em.emit(OP_MOV, slot + 2, sec);
+                em.emit(OP_GLIDEXY, slot);
                 break;
             }
             case 'locate_xy_time': {
@@ -1683,6 +1793,33 @@ export class Compiler {
                 em.emit(OP_SETVARVISIBLE, this.listSlot(p[0]), 1,
                     type === 'show_list' ? 1 : 0);
                 break;
+            // 편집기에서만 존재하는 생성/속성/교육용 메타 블록. 작품 실행 중에는
+            // 부작용이 없지만 타입을 명시해 미지원 경고와 구분한다.
+            case 'analizyDataAddButton':
+            case 'variableAddButton':
+            case 'listAddButton':
+            case 'messageAddButton':
+            case 'functionAddButton':
+            case 'function_name':
+            case 'showFunctionPropsButton':
+            case 'function_create':
+            case 'function_create_value':
+            case 'function_field_label':
+            case 'function_field_string':
+            case 'function_field_boolean':
+            case 'function_param_string':
+            case 'function_param_boolean':
+            case 'check_object_property':
+            case 'check_block_execution':
+            case 'switch_scope':
+            case 'is_answer_submited':
+            case 'check_lecture_goal':
+            case 'check_variable_by_name':
+            case 'show_prompt':
+            case 'check_goal_success':
+            case 'register_score':
+                this.ignore(type);
+                break;
             case 'stop_repeat':
             case 'continue_repeat': {
                 const loop = this.loops[this.loops.length - 1];
@@ -1707,8 +1844,9 @@ export class Compiler {
                 break;
             default: {
                 if (type.startsWith('func_')) { this.call(block, scope, false); break; }
-                // 식 블록이 문장 자리에 온 경우(값을 버리는 호출 등)는 평가만 한다.
-                this.note(type);
+                // 요청 범위 밖의 확장/AI/하드웨어 문장은 유령 블록으로 건너뛴다.
+                // 뒤의 명령은 계속 컴파일한다.
+                this.ignore(type);
                 break;
             }
         }
@@ -1875,7 +2013,8 @@ export class Compiler {
                 const hat = thread[0];
                 // Entry also serializes disconnected workspace blocks as
                 // threads. Only event hats are executable entry points.
-                if (!isBlock(hat) || !hat.type.startsWith('when_')) continue;
+                if (!isBlock(hat) || !(hat.type.startsWith('when_')
+                    || hat.type === 'mouse_clicked' || hat.type === 'mouse_click_cancled')) continue;
                 const scope = new Scope(0);
                 scope.params = [];
                 const pc = em.pc;

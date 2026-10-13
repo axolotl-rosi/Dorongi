@@ -204,6 +204,15 @@ export const OP_GE_LL = 147;
 export const OP_LISTGET_L = 148;
 export const OP_LISTSET_LL = 149;
 export const OP_TOUCHING = 150;       // a=dst b=target object(-1 mouse, -2 wall)
+export const OP_TABLECOEFF = 151;     // a=dst b=table c=args(col1,col2)
+export const OP_TABLELOOKUP = 152;    // a=dst b=table c=args(searchCol,value,returnCol)
+export const OP_OBJECTCLICKED = 153;  // a=dst — 현재 엔티티가 마지막으로 눌린 오브젝트인가
+export const OP_POINTTO = 154;        // a=target object(-1 mouse) — 현재 엔티티가 바라보기
+export const OP_BGM = 155;            // a=sound idx(-1이면 b=src), b=src
+export const OP_STOPBGM = 156;
+export const OP_BROADCASTWAIT = 157;  // a=message idx — 수신 스레드가 끝날 때까지 대기
+export const OP_NEIGHBORSCENE = 158;  // a=+1 next / -1 prev
+export const OP_TABLEVISIBLE = 159;   // a=table b=0 close / 1 table / 2 chart
 
 // OP_DATE 필드 번호. 엔진 `get_date`와 같은 순서·같은 보정이다
 // (월은 +1, **요일은 0~6 그대로** — 엔진이 `getDay()`를 보정 없이 돌려준다).
@@ -392,6 +401,8 @@ export const OP_NAMES = (() => {
     OP_MOVEANGLE, OP_BOUNCE, OP_TURNTIME,
     OP_SUB_LL, OP_MUL_LL, OP_DIV_LL, OP_MOD_LL, OP_QUOT_LL,
         OP_LT_LL, OP_GT_LL, OP_LE_LL, OP_GE_LL, OP_LISTGET_L, OP_LISTSET_LL,
+        OP_TABLECOEFF, OP_TABLELOOKUP, OP_OBJECTCLICKED, OP_POINTTO,
+        OP_BGM, OP_STOPBGM, OP_BROADCASTWAIT, OP_NEIGHBORSCENE, OP_TABLEVISIBLE,
     OP_TOUCHING,
     })) names[v] = k.slice(3);
     return names;

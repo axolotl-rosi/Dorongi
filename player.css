@@ -155,6 +155,24 @@
 
 .ev-variable.is-list[hidden] { display: none; }
 
+.ev-variable.is-table {
+    width: min(72%, 520px);
+    max-height: 62%;
+    background: #fffffff5;
+}
+
+.ev-variable.is-table .ev-variable-value {
+    max-height: 210px;
+    overflow: auto;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    line-height: 1.45;
+}
+
+.ev-variable.is-table.is-chart .ev-variable-name::after {
+    content: " · 차트 데이터";
+    opacity: .72;
+}
+
 .ev-bubbles { position: absolute; inset: 0; pointer-events: none; }
 
 .ev-bubble {

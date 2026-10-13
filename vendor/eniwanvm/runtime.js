@@ -107,7 +107,7 @@ class SoundPlayer {
         return { loaded, failed };
     }
 
-    /** `sink.sound`와 같은 모양. 동작 0=재생 1=모두멈춤 2=크기 3=이 오브젝트만 */
+    /** 동작 0=재생 1=모두멈춤 2=크기 3=오브젝트 4=속도 5=BGM 6=BGM멈춤. */
     handle(action, src, volume, _name, from = 0, dur = 0, _owner = -1, speed = 1) {
         this.volume = Math.max(0, Math.min(100, volume)) / 100;
         if (action === 2) {
@@ -121,11 +121,17 @@ class SoundPlayer {
         // 3(이 오브젝트의 소리만)도 지금은 전부 멈춘다. 오브젝트별로 가르려면
         // 재생마다 주인을 적어 둬야 하는데, 그건 소리가 실제로 겹치는 작품을
         // 보고 나서 넓히는 게 맞다 — 지금 반만 맞게 가르면 더 헷갈린다.
+        if (action === 6) {
+            for (const a of this.pool) if (a._eniwanBgm) {
+                a.pause(); a.currentTime = 0; a.loop = false; a._eniwanBgm = false;
+            }
+            return;
+        }
         if (action === 1 || action === 3) {
             for (const a of this.pool) { a.pause(); a.currentTime = 0; }
             return;
         }
-        if (action !== 0 || !src) return;
+        if (action !== 0 && action !== 5 || !src) return;
         // 도메인은 **엔트리 서버 규칙 경로에만** 붙인다. 로컬 `.ent`의 소리는
         // 호스트가 `/api/ent-asset/…`로 내주므로, 거기에 붙이면 404가 된다.
         const url = this._url(src);
@@ -143,6 +149,8 @@ class SoundPlayer {
         }
         audio.volume = this.muted ? 0 : this.volume * this.masterVolume;
         audio.playbackRate = Math.max(0.5, Math.min(2, speed));
+        audio.loop = action === 5;
+        audio._eniwanBgm = action === 5;
         audio.currentTime = from > 0 ? from : 0;
         if (dur > 0) {
             // `N초 재생`·`A초부터 B초까지`는 길이가 정해져 있다. 자동 재생 정책
@@ -953,6 +961,7 @@ export class EniwanRuntime {
         this.vm.setHost({ mouseX: stageX, mouseY: stageY, mouseDown: true });
         const objectIndex = pickObjectAt(this.vm, stageX, stageY);
         this.lastClickedObject = objectIndex;
+        this.vm.clickedObject = objectIndex;
         if (objectIndex < 0) return 0;
         return this.vm.wake('when_object_click', objectIndex);
     }
@@ -960,6 +969,7 @@ export class EniwanRuntime {
     releaseObjectClick() {
         const objectIndex = this.lastClickedObject;
         this.lastClickedObject = -1;
+        if (this.vm) this.vm.clickedObject = -1;
         return objectIndex >= 0 && this.vm
             ? this.vm.wake('when_object_click_canceled', objectIndex) : 0;
     }
