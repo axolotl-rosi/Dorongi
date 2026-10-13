@@ -855,6 +855,23 @@
     box-shadow: 0 0 24px rgba(50, 227, 218, .34), inset 0 1px rgba(255,255,255,.55);
 }
 .ev-cover-recommend { margin: 5px 2px 0; color: #7f96b3; font-size: 10px; }
+.ev-cover-mode {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 7px;
+    padding: 7px 9px;
+    border: 1px solid rgba(87, 180, 195, .16);
+    border-radius: 10px;
+    background: rgba(8, 28, 47, .55);
+    cursor: pointer;
+    transition: border-color .25s var(--ev-ease), background .25s var(--ev-ease), transform .2s var(--ev-ease);
+}
+.ev-cover-mode:hover { border-color: rgba(83, 226, 214, .38); background: rgba(13, 47, 65, .7); transform: translateY(-1px); }
+.ev-cover-mode-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.ev-cover-mode-copy strong { color: #dcecff; font-size: 11px; }
+.ev-cover-mode-copy small { color: #7890ad; font-size: 9px; line-height: 1.35; }
+.ev-cover-mode.is-auto .ev-cover-mode-copy small::after { content: " · 배속으로 자동 활성화"; color: #64dfd5; }
 
 .ev-cover-notices {
     position: absolute;
@@ -1078,6 +1095,9 @@
     border-top: 1px solid rgba(126, 160, 197, .1);
 }
 .ev-setting-row:first-child { border-top: 0; }
+.ev-setting-row.is-disabled { opacity: .5; cursor: not-allowed; }
+.ev-setting-row.is-disabled .ev-switch { cursor: not-allowed; }
+.ev-setting-row.is-auto .ev-setting-copy small::after { content: " · 배속으로 자동 활성화"; color: #64dfd5; }
 .ev-setting-row.is-revealed {
     border-radius: 10px;
     background: rgba(56, 220, 205, .12);

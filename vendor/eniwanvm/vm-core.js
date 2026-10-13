@@ -2986,7 +2986,8 @@ export class EniwanVM {
      * 반대로 프레임이 밀렸을 때 밀린 만큼 다 따라잡으려 하면 더 밀리는
      * 죽음의 나선이 되므로, 한 번에 따라잡는 틱 수에 상한을 둔다.
      */
-    advance(nowMs, maxTicksOverride, maxWorkMs = Infinity, stopAfterComplete = false) {
+    advance(nowMs, maxTicksOverride, maxWorkMs = Infinity, stopAfterComplete = false,
+        onTickComplete = null) {
         if (this.lastNowMs < 0) { this.lastNowMs = nowMs; return 0; }
         let delta = nowMs - this.lastNowMs;
         this.lastNowMs = nowMs;
@@ -3009,6 +3010,7 @@ export class EniwanVM {
                 const result = this.runTickChunk();
                 if (result.complete) {
                     ran += 1;
+                    if (typeof onTickComplete === 'function') onTickComplete(ran, this.stats.ticks);
                     // Give the renderer a presentation boundary. Starting another
                     // heavy tick here leaves tickInProgress=true and can hide the
                     // completed frame behind the partial-frame guard indefinitely.

@@ -333,6 +333,7 @@ export class EniwanRuntime {
         this.filename = '';
         this.tessCompatibilityMode = 'auto';
         this.dutCompatibility = false;
+        this.dororongMode = false;
         this.tessScrollPending = false;
 
         this.running = false;
@@ -570,6 +571,10 @@ export class EniwanRuntime {
     setTurbo(multiplier) {
         this.turbo = Math.max(1, Math.min(16, Number(multiplier) || 1));
         if (this.vm) this.vm.tickMultiplier = this.turbo;
+    }
+
+    setDororongMode(enabled = false) {
+        this.dororongMode = enabled === true;
     }
 
     setEnvironment({ boostMode = false, deviceType = 'desktop', touchSupported = false } = {}) {
@@ -1078,6 +1083,17 @@ export class EniwanRuntime {
         this._activePenObject = null;
     }
 
+    /**
+     * 도로롱 모드의 논리 tick 경계다. 화면에 즉시 제출하지는 않지만 현재 tick의
+     * 펜 명령을 끝내고 완성 텍스처를 보존한다. 다음 tick이 프레임 예산 중간에서
+     * 멈춰도 사용자는 마지막 완성 화면을 계속 보게 된다.
+     */
+    _commitCompletedPenTick() {
+        this._finishPenLayer();
+        for (const layer of this.penLayers.values()) layer.commitCompleted?.();
+        this._applyViewport();
+    }
+
     /** 모든 오브젝트의 펜만 지운다. 루프 중이면 같은 소유자 버퍼에서 계속한다. */
     _clearCurrentPen() {
         const objectIndex = this._penObject();
@@ -1288,9 +1304,17 @@ export class EniwanRuntime {
             // 연달아 처리하면 합성 기회가 계속 밀려 계산 중인 빈 화면처럼 보인다.
             // A catch-up batch cannot change mouseDown halfway through. Keep
             // press/release edges on separate logical frames.
-            const catchUpTicks = this.pointerEdgeQueue.length ? 1 : this.catchUpTicks;
+            const hasPointerEdge = this.pointerEdgeQueue.length > 0;
+            const dororongBatch = this.dororongMode && !hasPointerEdge;
+            const catchUpTicks = hasPointerEdge ? 1 : this.catchUpTicks;
             const mouseDownReadsBefore = this.vm.hostReadCounts[HOST_MOUSE_DOWN];
-            const advance = () => this.vm.advance(now, catchUpTicks, this.frameWorkMs, true);
+            const advance = () => this.vm.advance(
+                now,
+                catchUpTicks,
+                this.frameWorkMs,
+                !dororongBatch,
+                dororongBatch ? () => this._commitCompletedPenTick() : null,
+            );
             const ticks = this.objPreview
                 ? this.objPreview.withPresentationSuppressed(this.vm, advance)
                 : advance();

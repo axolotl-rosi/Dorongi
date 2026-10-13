@@ -371,6 +371,8 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
     let speedSelect = null;
     let coverCompute = null;
     let coverTurbo = null;
+    let coverDororong = null;
+    let settingsDororong = null;
     let variableMonitors = [];
     let tableMonitors = [];
     let autoOverloadSamples = 0;
@@ -398,6 +400,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             ? settings.renderMode : 'auto',
         tessMode: ['auto', 'on', 'off'].includes(settings.tessMode) ? settings.tessMode : 'auto',
         dutMode: settings.dutMode === true,
+        dororongMode: settings.dororongMode === true,
         diagnostics: settings.diagnostics === true,
         volume: Math.max(0, Math.min(100, Math.round(Number(settings.volume ?? 100)))),
     };
@@ -412,6 +415,20 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         const hz = current.renderMode === '60' ? 60 : current.renderMode === '120' ? 120 : 0;
         runtime?.setRenderHz(hz);
     };
+    const isDororongActive = () => current.turbo > 1 || current.dororongMode;
+    const syncDororongMode = () => {
+        const active = isDororongActive();
+        const automatic = current.turbo > 1;
+        runtime?.setDororongMode(active);
+        root.dataset.dororongMode = active ? 'on' : 'off';
+        for (const input of [settingsDororong, coverDororong]) {
+            if (!input) continue;
+            input.checked = active;
+            input.disabled = automatic;
+            input.title = automatic ? `${current.turbo}배속에서 자동 활성화됨` : '1배속 수동 설정';
+            input.closest('label')?.classList.toggle('is-auto', automatic);
+        }
+    };
     const persistSettings = () => window.postMessage({
         __eniwanvm: 'settings-save',
         settings: {
@@ -424,6 +441,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             renderMode: current.renderMode,
             tessMode: current.tessMode,
             dutMode: current.dutMode,
+            dororongMode: current.dororongMode,
             diagnostics: current.diagnostics,
             volume: current.volume,
         },
@@ -488,8 +506,17 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         String(current.turbo), (value) => {
             current.turbo = Math.max(1, Math.min(16, Number(value) || 1));
             runtime?.setTurbo(current.turbo);
+            syncDororongMode();
             speedSelect?.select(current.turbo);
             coverTurbo?.select(current.turbo);
+            persistSettings();
+        });
+    settingsDororong = settingToggle(executionSettings, '도로롱 모드',
+        '반복 실행 순서를 유지하면서 여러 틱을 연속 처리해 더 빠르게 실행해요. 작품에 따라 실제 속도와 화면 반응이 달라질 수 있어요.',
+        isDororongActive(), (value) => {
+            if (current.turbo > 1) return;
+            current.dororongMode = value;
+            syncDororongMode();
             persistSettings();
         });
     const renderModeSelect = settingSelect(executionSettings, '화면 갱신',
@@ -563,6 +590,11 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             runtime?.setDutCompatibility(value);
             persistSettings();
         });
+    const axolotlModeToggle = settingToggle(experimentalSettings, 'AXOLOTL MODE · 준비 중',
+        '일부 반복 지연을 생략해 연산 성능의 한계에 도전해요. 대규모 계산에 적합한 실험적 기능이며, 일반 게임의 동작이 달라질 수 있어요.',
+        false, () => {});
+    axolotlModeToggle.disabled = true;
+    axolotlModeToggle.closest('.ev-setting-row')?.classList.add('is-disabled');
     const forceToggle = settingToggle(experimentalSettings, '미지원 블록 무시하고 강행',
         '옮기지 못한 블록을 제외하므로 작품 결과가 달라질 수 있습니다.',
         current.force === true, (value) => {
@@ -699,6 +731,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         current.boostMode = false;
         current.tessMode = 'auto';
         current.dutMode = false;
+        current.dororongMode = false;
         current.diagnostics = false;
         current.volume = 100;
         settingsCompute.value = '0';
@@ -716,6 +749,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         forceToggle.checked = false;
         tessModeSelect.value = 'auto';
         dutModeToggle.checked = false;
+        syncDororongMode();
         root.classList.remove('show-diagnostics');
         runtime?.setComputeLevel(current.computeLevel);
         runtime?.setTurbo(1);
@@ -1327,6 +1361,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         });
         runtime.setComputeLevel(current.computeLevel);
         runtime.setTurbo(current.turbo);
+        syncDororongMode();
         runtime.setVolume(current.volume);
         buildDockControls();
         return runtime;
@@ -1348,6 +1383,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         speedSelect = numberField(dockMid, '배속 ×', current.turbo, (v) => {
                 current.turbo = v;
                 runtime?.setTurbo(v);
+                syncDororongMode();
                 coverTurbo?.select(v);
                 settingsTurbo.value = String(v);
                 persistSettings();
@@ -1405,6 +1441,21 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         selectTier(current.computeLevel);
         recommend = el('p', 'ev-cover-recommend', coverOptions);
         recommend.textContent = computeLevelDescription(current.computeLevel);
+        const dororongRow = el('label', 'ev-cover-mode', coverOptions);
+        const dororongCopy = el('span', 'ev-cover-mode-copy', dororongRow);
+        el('strong', '', dororongCopy).textContent = '도로롱 모드';
+        el('small', '', dororongCopy).textContent = '반복 실행 순서를 유지하면서 여러 틱을 연속 처리해 더 빠르게 실행해요. 작품에 따라 실제 속도와 화면 반응이 달라질 수 있어요.';
+        coverDororong = el('input', 'ev-setting-check ev-cover-dororong-check', dororongRow);
+        coverDororong.type = 'checkbox';
+        coverDororong.setAttribute('aria-label', '도로롱 모드');
+        el('span', 'ev-switch', dororongRow).setAttribute('aria-hidden', 'true');
+        coverDororong.onchange = () => {
+            if (current.turbo > 1) return;
+            current.dororongMode = coverDororong.checked;
+            syncDororongMode();
+            persistSettings();
+        };
+        syncDororongMode();
         /* 배속은 실행 중 도구 막대와 설정에서 조절한다. 시작 화면은 실행 결정을 단순하게 둔다. */
         coverTurbo = {
             select(value) { settingsTurbo.value = String(value); },
@@ -1452,6 +1503,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         const { analysis, program, compileMs } = result;
         runtime.setTessCompatibility(current.tessMode);
         runtime.setDutCompatibility(current.dutMode);
+        syncDororongMode();
         applyEnvironment();
         applyRenderMode();
         configureEnvironmentNotices(program);
@@ -1568,6 +1620,8 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
                 speedSelect?.select(next.turbo);
                 coverTurbo?.select(next.turbo);
             }
+            current.dororongMode = next.dororongMode === true;
+            syncDororongMode();
             if (next.renderMode !== current.renderMode) {
                 current.renderMode = next.renderMode;
                 renderModeSelect.value = next.renderMode;
