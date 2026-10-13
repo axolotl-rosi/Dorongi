@@ -587,7 +587,7 @@ export class Compiler {
             // error instead of guessing the wrong argument.
             if (scope.params?.length === 1) return 0;
             const r = scope.alloc();
-            this.note(type);
+            this.ignore(type);
             em.emit(OP_CONST, r, em.constIdx(0));
             return r;
         }
@@ -684,7 +684,7 @@ export class Compiler {
             }
             case 'boolean_basic_operator': {
                 const op = CMP_OPS[p[1]];
-                if (op === undefined) { this.note(`boolean:${p[1]}`); return this.expr(0, scope); }
+                if (op === undefined) { this.ignore(`boolean:${p[1]}`); return this.expr(0, scope); }
                 return this.binary(op, p[0], p[2], scope);
             }
             case 'boolean_and_or': {
@@ -747,7 +747,7 @@ export class Compiler {
                 const target = String(p[1] ?? 'self');
                 let objectIndex = -1;
                 if (target !== 'self') {
-                    objectIndex = this.stage.objects.findIndex((o) => o.id === target);
+                    objectIndex = this.stage.objects.findIndex((o) => o.id === target || o.name === target);
                     if (objectIndex < 0) { this.note(type); return this.expr(0, scope); }
                 }
                 const r = scope.alloc();
@@ -757,7 +757,7 @@ export class Compiler {
             // 소리 길이는 project.json에 적혀 있다 — 상수로 박는다.
             case 'get_sound_duration': {
                 const idx = this._assetIndex(p[1], this._sounds);
-                if (idx < 0) { this.note(type); return this.expr(0, scope); }
+                if (idx < 0) { this.ignore(type); return this.expr(0, scope); }
                 return this.expr(this._sounds[idx].duration, scope);
             }
             case 'get_sound_volume':
@@ -902,7 +902,7 @@ export class Compiler {
                 let objectIndex = -1;
                 if (target !== 'mouse') {
                     objectIndex = this.stage.objects.findIndex((o) => o.id === target || o.name === target);
-                    if (objectIndex < 0) { this.note(type); return this.expr(0, scope); }
+                    if (objectIndex < 0) { this.ignore(type); return this.expr(0, scope); }
                 }
                 const r = scope.alloc();
                 em.emit(OP_DISTANCE, r, objectIndex);
@@ -915,7 +915,7 @@ export class Compiler {
                 if (target === 'wall' || target === 'edge') objectIndex = -2;
                 else if (target !== 'mouse') {
                     objectIndex = this.stage.objects.findIndex((o) => o.id === target || o.name === target);
-                    if (objectIndex < 0) { this.note(type); return this.expr(0, scope); }
+                    if (objectIndex < 0) { this.ignore(type); return this.expr(0, scope); }
                 }
                 const r = scope.alloc();
                 em.emit(OP_TOUCHING, r, objectIndex);
@@ -985,7 +985,7 @@ export class Compiler {
             case 'get_date': {
                 // paramsKeyMap VALUE:1 — 앞뒤 슬롯은 UI 텍스트다.
                 const field = DATE_FIELDS[String(p[1] || '').toUpperCase()];
-                if (field === undefined) { this.note(`${type}:${p[1]}`); return this.expr(0, scope); }
+                if (field === undefined) { this.ignore(`${type}:${p[1]}`); return this.expr(0, scope); }
                 const r = scope.alloc();
                 em.emit(OP_DATE, r, field);
                 return r;
@@ -1019,7 +1019,7 @@ export class Compiler {
                 const objectIndex = target === 'self' || target === ''
                     ? this.currentObject
                     : this.stage.objects.findIndex((o) => o.id === target || o.name === target);
-                if (objectIndex < 0) { this.note(type); return this.expr('', scope); }
+                if (objectIndex < 0) { this.ignore(type); return this.expr('', scope); }
                 const r = scope.alloc();
                 em.emit(OP_TEXTREAD, r, objectIndex);
                 return r;
@@ -1079,7 +1079,7 @@ export class Compiler {
         const name = node.type.slice('func_'.length);
         const fnIdx = this.funcIndex.get(name);
         if (fnIdx === undefined) {
-            this.note(node.type);
+            this.ignore(node.type);
             if (!wantValue) return -1;
             return this.expr(0, scope);
         }
@@ -1436,7 +1436,7 @@ export class Compiler {
                     em.emit(OP_LOADHOST, args + 1, HOST_MOUSE_Y);
                 } else {
                     const objectIndex = this.stage.objects.findIndex((o) => o.id === target || o.name === target);
-                    if (objectIndex < 0) { this.note(type); break; }
+                    if (objectIndex < 0) { this.ignore(type); break; }
                     em.emit(OP_LOADENT, args, ENT_X, objectIndex);
                     em.emit(OP_LOADENT, args + 1, ENT_Y, objectIndex);
                 }
@@ -1525,7 +1525,7 @@ export class Compiler {
             case 'change_effect_amount':
             case 'add_effect_amount': {
                 const effect = EFFECTS[String(p[0] ?? '').toLowerCase()];
-                if (effect === undefined) { this.note(`${type}:${p[0]}`); break; }
+                if (effect === undefined) { this.ignore(`${type}:${p[0]}`); break; }
                 const src = this.expr(p[1], scope);
                 em.emit(type === 'add_effect_amount' ? OP_ADDEFFECT : OP_SETEFFECT, effect, src);
                 break;
@@ -1533,7 +1533,7 @@ export class Compiler {
             case 'set_effect_volume': {
                 // 구형 블록 이름이지만 동작은 현재의 "효과를 만큼 바꾸기"와 같다.
                 const effect = EFFECTS[String(p[0] ?? '').toLowerCase()];
-                if (effect === undefined) { this.note(`${type}:${p[0]}`); break; }
+                if (effect === undefined) { this.ignore(`${type}:${p[0]}`); break; }
                 em.emit(OP_ADDEFFECT, effect, this.expr(p[1], scope));
                 break;
             }
@@ -1577,8 +1577,8 @@ export class Compiler {
                 const target = String(p[0] ?? 'self');
                 let objectIndex = -1;
                 if (target !== 'self') {
-                    objectIndex = this.stage.objects.findIndex((o) => o.id === target);
-                    if (objectIndex < 0) { this.note(type); break; }
+                    objectIndex = this.stage.objects.findIndex((o) => o.id === target || o.name === target);
+                    if (objectIndex < 0) { this.ignore(type); break; }
                 }
                 em.emit(OP_CLONE, objectIndex);
                 this.emittedClone = true;
@@ -1670,7 +1670,7 @@ export class Compiler {
             // 엔진으로 넘기면 그 작품은 엔진 속도로 떨어지므로 VM에서 직접 한다.
             case 'change_object_index': {
                 const where = ZORDER_LOCATIONS[String(p[0] ?? '').toUpperCase()];
-                if (where === undefined) { this.note(`${type}:${p[0]}`); break; }
+                if (where === undefined) { this.ignore(`${type}:${p[0]}`); break; }
                 em.emit(OP_SETINDEX, where);
                 break;
             }
@@ -1766,7 +1766,7 @@ export class Compiler {
                 break;
             case 'choose_project_timer_action': {
                 const action = TIMER_ACTIONS[String(p[1] ?? '').toUpperCase()];
-                if (action === undefined) { this.note(`${type}:${p[1]}`); break; }
+                if (action === undefined) { this.ignore(`${type}:${p[1]}`); break; }
                 em.emit(OP_TIMERACT, action);
                 break;
             }
@@ -1833,10 +1833,10 @@ export class Compiler {
             case 'stop_object': {
                 const modes = { all: 0, thisOnly: 1, thisThread: 2, otherThread: 3, other_objects: 4 };
                 const mode = modes[String(p[0] ?? 'all')];
-                if (mode === undefined) this.note(`${type}:${p[0]}`);
-        else if (mode === 2 && this.functionExitPatches) {
-          this.functionExitPatches.push(em.emit(OP_JMP, 0));
-        } else em.emit(OP_STOP, mode);
+                if (mode === undefined) this.ignore(`${type}:${p[0]}`);
+                else if (mode === 2 && this.functionExitPatches) {
+                    this.functionExitPatches.push(em.emit(OP_JMP, 0));
+                } else em.emit(OP_STOP, mode);
                 break;
             }
             case 'restart_project':
