@@ -265,6 +265,7 @@ export class EniwanVM {
         this.listVersions = new Uint32Array(program.lists.length);
         this.tables = [];
         this.tableVisible = new Int8Array((program.tables || []).length);
+        this.tableVisibleTicks = new Int32Array((program.tables || []).length);
         this.clickedObject = -1;
 
         this.host = new Float64Array(HOST_SLOTS);
@@ -623,6 +624,7 @@ export class EniwanVM {
             rows: (table.rows || []).map((row) => row.slice()),
         }));
         this.tableVisible.fill(0);
+        this.tableVisibleTicks.fill(0);
         this.clickedObject = -1;
 
         this.alive.fill(0);
@@ -1729,6 +1731,11 @@ export class EniwanVM {
                 this.timerTicks += 1;
                 this.host[HOST_TIMER] = this.timerTicks / this.logicHz;
             }
+            for (let table = 0; table < this.tableVisibleTicks.length; table += 1) {
+                if (this.tableVisibleTicks[table] > 0 && --this.tableVisibleTicks[table] === 0) {
+                    this.tableVisible[table] = 0;
+                }
+            }
         }
 
         this._inTick = true;
@@ -2285,7 +2292,14 @@ export class EniwanVM {
                         this._regValue(base + c + 2)));
                     break;
                 case OP_TABLEVISIBLE:
-                    if (a >= 0 && a < this.tableVisible.length) this.tableVisible[a] = b;
+                    if (a < 0) {
+                        this.tableVisible.fill(0);
+                        this.tableVisibleTicks.fill(0);
+                    } else if (a < this.tableVisible.length) {
+                        this.tableVisible[a] = b === 3 ? 1 : b;
+                        this.tableVisibleTicks[a] = b === 3
+                            ? Math.max(1, Math.round(this._num(base + c) * this.logicHz)) : 0;
+                    }
                     break;
 
                 case OP_PENDOWN: this.pen.down = true; break;

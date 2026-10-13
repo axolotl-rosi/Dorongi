@@ -1234,14 +1234,14 @@ export class Compiler {
                 break;
             case 'open_table':
             case 'open_table_chart':
+                em.emit(OP_TABLEVISIBLE, this.tableSlot(p[0]), type === 'open_table' ? 1 : 2);
+                break;
             case 'close_table_chart':
-                em.emit(OP_TABLEVISIBLE, this.tableSlot(p[0]),
-                    type === 'open_table' ? 1 : type === 'open_table_chart' ? 2 : 0);
+                em.emit(OP_TABLEVISIBLE, -1, 0);
                 break;
             case 'open_table_wait': {
-                this.ignore('open_table_wait:ui');
-                if (staticNumber(p[1]) !== 0) em.emit(OP_SLEEP, this.expr(p[1], scope));
-                else this.optimize('zero_wait');
+                const seconds = this.expr(p[1], scope);
+                em.emit(OP_TABLEVISIBLE, this.tableSlot(p[0]), 3, seconds);
                 break;
             }
             case 'repeat_inf': {
