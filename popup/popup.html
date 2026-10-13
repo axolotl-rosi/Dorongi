@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+  <meta charset="utf-8">
+  <title>Dorongi</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+  <main class="panel">
+    <header class="head">
+      <img class="brand-icon" src="../Dorongi.png" alt="">
+      <span class="dot" id="dot" aria-hidden="true"></span>
+      <h1 class="name">Dorongi <small>v4.0.0</small></h1>
+      <button id="enabled" class="pill" type="button" role="switch" aria-checked="true">
+        <span class="pill-knob" aria-hidden="true"></span>
+        <span class="pill-text" id="pillText">켜짐</span>
+      </button>
+    </header>
+
+    <section class="welcome">
+      <strong>작품 페이지에서 자동으로 실행됩니다</strong>
+      <p>Dorongi 설정은 작품 화면 오른쪽 아래의 설정 버튼에서 변경할 수 있습니다.</p>
+    </section>
+
+    <section class="live" id="live">
+      <div class="live-empty" id="liveEmpty">현재 실행 중인 Dorongi 작품이 없습니다</div>
+      <dl class="live-grid" id="liveGrid" hidden>
+        <div class="cell cell--wide">
+          <dt>작품</dt>
+          <dd id="mName">—</dd>
+        </div>
+        <div class="cell">
+          <dt>FPS</dt>
+          <dd id="mFps">—</dd>
+        </div>
+        <div class="cell"><dt>프레임</dt><dd id="mFrame">—</dd></div>
+        <div class="cell"><dt>로직</dt><dd id="mLogic">—</dd></div>
+        <div class="cell"><dt>렌더</dt><dd id="mRender">—</dd></div>
+        <div class="cell">
+          <dt>티어</dt>
+          <dd id="mTier">—</dd>
+        </div>
+        <div class="cell">
+          <dt>명령어</dt>
+          <dd id="mSteps">—</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="block about">
+      <h2 class="block-title">개발자 정보</h2>
+      <dl class="about-grid">
+        <div><dt>개발자</dt><dd>로시 (Axolotl_rosi)</dd></div>
+        <div><dt>GitHub</dt><dd><a href="https://github.com/axolotl-rosi" target="_blank" rel="noreferrer">github.com/axolotl-rosi</a></dd></div>
+      </dl>
+    </section>
+
+    <footer class="foot">
+      작품의 원본 데이터는 수정하지 않습니다. 확장을 끄면 Entry 기본 실행기로 돌아갑니다.
+    </footer>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+
+</html>

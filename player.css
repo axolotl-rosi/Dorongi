@@ -1,0 +1,1225 @@
+/*
+ * 페이지에 얹히는 실행기의 모양.
+ *
+ * playentry의 스타일이 흘러 들어오지 않게 전부 `ev-`로 접두사를 붙이고, 글꼴·크기도
+ * 직접 지정한다(페이지가 `font-size`를 바꿔 두면 레이아웃이 어긋난다).
+ *
+ * 색은 엔트리의 흰 화면이 아니라 EniwanVM 대시보드와 같은 어두운 콘솔 쪽이다 —
+ * 지금 어느 실행기로 돌고 있는지가 눈으로 바로 구분돼야 한다.
+ */
+
+.ev-host {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+}
+
+/*
+ * 감춘 것은 정말로 감춰 둔다.
+ *
+ * 아래 `.ev-cover`·`.ev-go`·`.ev-error`는 모두 `display`를 직접 지정하는데, 클래스
+ * 선택자(0,1,0)가 브라우저 기본 `[hidden] { display: none }`(0,0,1)을 이긴다. 그래서
+ * `cover.hidden = true`를 해도 표지가 화면에 그대로 남아 무대를 가린다 — ▶ 를 눌러도
+ * 선택 화면이 안 넘어가던 원인이 이것이다. 속성은 바뀌었으니 자동 검사는 통과하고,
+ * 사람 눈에만 보인다.
+ */
+.ev-player [hidden] {
+    display: none !important;
+}
+
+.ev-player {
+    --ev-bg: #0b1220;
+    --ev-panel: #111b2e;
+    --ev-line: #22304a;
+    --ev-text: #dce8fb;
+    --ev-dim: #7c90ae;
+    --ev-accent: #35d6c6;
+    --ev-warn: #ffb545;
+    --ev-bad: #ff6b6b;
+    --ev-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--ev-bg);
+    color: var(--ev-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow: hidden;
+}
+
+.ev-player.is-full {
+    width: 100vw;
+    height: 100vh;
+}
+
+.ev-player.is-full .ev-stage-wrap {
+    width: 100vw;
+    height: auto;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+
+/* ── 무대 ──────────────────────────────────────────────────────────────── */
+
+.ev-stage-wrap {
+    position: relative;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    flex: 1 1 auto;
+    outline: none;
+    container-type: size;
+}
+
+.ev-stage-wrap:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--ev-accent);
+}
+
+.ev-stage {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* 무대는 픽셀 그대로가 기준이다 — 브라우저가 흐리게 늘리면 펜 선이 뭉개진다. */
+    image-rendering: pixelated;
+}
+
+/* 글상자는 sink로 오지 않고 VM이 `vm.texts`에 바로 쓴다 — 그래서 DOM으로 덧그린다. */
+.ev-texts {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.ev-text-object {
+    position: absolute;
+    white-space: pre-wrap;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+    transform: translateY(-50%);
+    transform-origin: left center;
+    line-height: 1.25;
+    text-shadow: none;
+}
+
+/* Entry의 "보이는 변수/리스트"를 VM 값으로 직접 갱신한다. */
+.ev-variables {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.ev-variable {
+    position: absolute;
+    display: inline-flex;
+    align-items: stretch;
+    max-width: 70%;
+    min-height: 22px;
+    border: 1px solid #c4c7cc;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #fff;
+    color: #34373d;
+    font: 12px/20px -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+    box-shadow: 0 1px 2px #0003;
+    transform: translateY(-50%);
+}
+
+.ev-variable[hidden] { display: none; }
+
+.ev-variable.is-list {
+    display: block;
+    min-width: 120px;
+    max-width: 70%;
+    max-height: 55%;
+    overflow: hidden;
+}
+
+.ev-variable.is-list .ev-variable-name {
+    display: block;
+}
+
+.ev-variable.is-list .ev-variable-value {
+    display: block;
+    max-height: 120px;
+    overflow: hidden;
+    padding: 2px 6px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ev-variable.is-list[hidden] { display: none; }
+
+.ev-bubbles { position: absolute; inset: 0; pointer-events: none; }
+
+.ev-bubble {
+    position: absolute;
+    max-width: 42%;
+    padding: 6px 9px;
+    border: 1px solid #b7c1d1;
+    border-radius: 12px;
+    background: #fffffff2;
+    color: #242832;
+    font: 12px/1.35 -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    transform: translate(-50%, -100%);
+    box-shadow: 0 2px 8px #0004;
+}
+
+.ev-bubble::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -7px;
+    width: 12px; height: 12px;
+    border-right: 1px solid #b7c1d1;
+    border-bottom: 1px solid #b7c1d1;
+    background: #fff;
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.ev-bubble.is-think { border-radius: 18px; }
+.ev-bubble.is-think::after { width: 7px; height: 7px; border-radius: 50%; bottom: -9px; }
+
+.ev-ask {
+    position: absolute;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: #07101ccc;
+}
+
+.ev-ask-card {
+    width: min(360px, 88%);
+    padding: 16px;
+    border: 1px solid #31425e;
+    border-radius: 14px;
+    background: #111b2ef5;
+    box-shadow: 0 14px 40px #0008;
+}
+
+.ev-ask-question { margin-bottom: 11px; color: var(--ev-text); font-size: 14px; line-height: 1.45; }
+.ev-ask-row { display: flex; gap: 8px; }
+.ev-ask-input {
+    min-width: 0; flex: 1 1 auto; padding: 8px 10px;
+    border: 1px solid #31425e; border-radius: 8px;
+    background: #0b1220; color: var(--ev-text); font: inherit; outline: none;
+}
+.ev-ask-input:focus { border-color: var(--ev-accent); }
+.ev-ask-submit {
+    padding: 8px 13px; border: 1px solid #1d5f57; border-radius: 8px;
+    background: #10322e; color: var(--ev-accent); font: inherit; cursor: pointer;
+}
+
+.ev-variable-name {
+    padding: 0 6px;
+    background: #f1f2f4;
+    border-right: 1px solid #d1d4d9;
+    white-space: nowrap;
+}
+
+.ev-variable-value {
+    min-width: 28px;
+    padding: 0 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+    color: #168c82;
+    font-family: var(--ev-mono);
+}
+
+/* ── 무대 위 HUD ───────────────────────────────────────────────────────── */
+
+.ev-hud {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+}
+
+.ev-chip,
+.ev-fps {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #0b1220b3;
+    border: 1px solid var(--ev-line);
+    font-family: var(--ev-mono);
+    font-size: 11px;
+    letter-spacing: .02em;
+    color: var(--ev-dim);
+}
+
+.ev-chip--t1 { color: #8fd3ff; border-color: #2a4a6b; }
+.ev-chip--t2 { color: #b7a6ff; border-color: #413a74; }
+.ev-chip--t3 { color: var(--ev-accent); border-color: #1d5f57; }
+
+.ev-fps { color: var(--ev-text); }
+.ev-fps.is-bad { color: #ffd27a; border-color: #75602b; background: rgba(46, 38, 16, .86); }
+
+/* ── 시작 화면 ─────────────────────────────────────────────────────────── */
+
+.ev-cover {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: #0b1220e6;
+    text-align: center;
+    padding: 16px;
+}
+
+/* 썸네일은 배경으로만 깔아 흐리게 둔다 — 작품을 알아볼 정도면 충분하다. */
+.ev-cover-art {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: .52;
+    filter: saturate(.9);
+}
+
+.ev-cover-logo {
+    position: absolute;
+    left: 50%;
+    top: 28%;
+    width: clamp(72px, 18%, 124px);
+    aspect-ratio: 1;
+    border-radius: 22%;
+    object-fit: cover;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 12px 34px #0009;
+}
+
+.ev-go {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border: 1px solid #1d5f57;
+    border-radius: 999px;
+    background: #10322e;
+    color: var(--ev-accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .12s, transform .12s;
+}
+
+.ev-go:hover { background: #154039; }
+.ev-go:active { transform: scale(.98); }
+
+.ev-go svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+}
+
+.ev-cover-line {
+    position: relative;
+    margin: 0;
+    max-width: 90%;
+    color: var(--ev-dim);
+    font-size: 12px;
+    word-break: break-all;
+}
+
+.ev-cover-line.is-warn { color: var(--ev-warn); }
+
+.ev-cover-stats {
+    position: relative;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.ev-cover-options {
+    position: relative;
+    display: flex;
+    align-items: end;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #ffffff24;
+    border-radius: 10px;
+    background: #07101dcc;
+}
+
+.ev-player.is-idle .ev-texts,
+.ev-player.is-idle .ev-bubbles,
+.ev-player.is-idle .ev-variables,
+.ev-player.is-idle .ev-ask { display: none !important; }
+
+/* ── 일시정지 오버레이 ─────────────────────────────────────────────────── */
+
+.ev-pause-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(11, 18, 32, 0.72);
+    backdrop-filter: blur(4px);
+    cursor: pointer;
+    user-select: none;
+    pointer-events: auto;
+    transition: opacity .18s;
+}
+.ev-player.is-stopped .ev-pause-overlay { cursor: default; }
+.ev-player.is-stopped .ev-pause-card { cursor: default; }
+
+.ev-pause-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 18px 26px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    background: rgba(17, 27, 46, 0.9);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.ev-pause-logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    object-fit: cover;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.ev-pause-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ev-text);
+    letter-spacing: .02em;
+}
+
+.ev-pause-desc {
+    font-size: 12px;
+    color: var(--ev-dim);
+}
+
+.ev-env-panel {
+    position: absolute; inset: 0; z-index: 80;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(3, 8, 17, .88); backdrop-filter: blur(5px);
+}
+.ev-env-toggle { position: absolute; opacity: 0; pointer-events: none; }
+.ev-env-toggle:not(:checked) + .ev-env-panel { display: none; }
+.ev-env-card { width: min(380px, 88%); padding: 20px; border: 1px solid var(--ev-line);
+    border-radius: 14px; background: var(--ev-panel); text-align: left; }
+.ev-env-card h3 { margin: 0 0 6px; color: var(--ev-text); font-size: 16px; }
+.ev-env-card p { margin: 0 0 16px; color: var(--ev-dim); font-size: 12px; }
+.ev-env-grid { display: grid; gap: 12px; }
+.ev-env-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+.ev-env-open, .ev-env-close { border: 1px solid var(--ev-line); border-radius: 7px;
+    padding: 7px 11px; background: #101c30; color: var(--ev-text); cursor: pointer; }
+
+.ev-select-field {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    color: var(--ev-dim);
+    font-size: 10px;
+}
+
+.ev-select,
+.ev-speed-input {
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--ev-line);
+    border-radius: 6px;
+    background: #101c30;
+    color: var(--ev-text);
+    font: 11px var(--ev-mono);
+}
+
+.ev-number-input {
+    width: 54px;
+    height: 28px;
+    box-sizing: border-box;
+    border: 1px solid var(--ev-line);
+    border-radius: 7px;
+    padding: 0 5px;
+    background: #101c30;
+    color: var(--ev-text);
+    font: 11px var(--ev-mono);
+    text-align: center;
+    outline: none;
+    transition: border-color var(--ev-fast), background var(--ev-fast), box-shadow var(--ev-fast);
+}
+.ev-number-input:hover, .ev-number-input:focus { border-color: #3fcfc5; box-shadow: 0 0 0 3px rgba(63,207,197,.1); }
+
+.ev-volume { position: relative; display: inline-flex; align-items: center; color: #9bb0c9; }
+.ev-volume-icon { display: grid; place-items: center; width: 26px; height: 26px; }
+.ev-volume-icon svg { width: 15px; height: 15px; fill: currentColor; }
+.ev-volume-input { width: 72px; accent-color: #35d6c6; cursor: pointer; }
+.ev-volume-popover {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    z-index: 120;
+    padding: 9px 11px;
+    border: 1px solid #34516e;
+    border-radius: 11px;
+    background: rgba(8, 24, 43, .98);
+    box-shadow: 0 12px 32px rgba(0,0,0,.42);
+    transform-origin: right bottom;
+    animation: ev-volume-in .2s var(--ev-ease) both;
+}
+@keyframes ev-volume-in { from { opacity: 0; transform: translateY(5px) scale(.94); } to { opacity: 1; transform: none; } }
+
+.ev-speed-input { width: 72px; }
+
+.ev-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-family: var(--ev-mono);
+}
+
+.ev-stat-k { font-size: 10px; color: var(--ev-dim); }
+.ev-stat-v { font-size: 12px; color: var(--ev-text); }
+
+/* ── 조작 콘솔 ─────────────────────────────────────────────────────────── */
+/* 엔트리 바를 흉내내지 않는다. 속도 설정이 주인공인 가로 콘솔이다. */
+
+.ev-dock {
+    position: relative;
+    flex: 0 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    background: rgba(17, 27, 46, 0.9);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ev-dock-side {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ev-dock-mid {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.ev-dock-right { margin-left: auto; }
+
+.ev-btn {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--ev-line);
+    border-radius: 6px;
+    background: #16233a;
+    color: var(--ev-text);
+    cursor: pointer;
+}
+
+.ev-btn:hover:not(:disabled) { background: #1d2d49; }
+.ev-btn:disabled { opacity: .4; cursor: default; }
+
+.ev-btn svg {
+    width: 13px;
+    height: 13px;
+    fill: currentColor;
+}
+
+.ev-control-btn {
+    display: inline-flex;
+    width: auto;
+    min-width: 76px;
+    padding: 0 9px;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.ev-control-btn span {
+    font-size: 11px;
+}
+
+/* 선으로 그린 아이콘은 채우면 덩어리가 된다. */
+.ev-btn svg.ev-stroke {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+}
+
+.ev-seg {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.ev-seg-label {
+    font-size: 10px;
+    color: var(--ev-dim);
+    white-space: nowrap;
+}
+
+.ev-seg-row {
+    display: flex;
+    border: 1px solid var(--ev-line);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.ev-seg-btn {
+    padding: 3px 7px;
+    border: 0;
+    border-left: 1px solid var(--ev-line);
+    background: #16233a;
+    color: var(--ev-dim);
+    font-family: var(--ev-mono);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.ev-seg-btn:first-child { border-left: 0; }
+.ev-seg-btn:hover { color: var(--ev-text); }
+
+.ev-seg-btn.is-on {
+    background: #10322e;
+    color: var(--ev-accent);
+}
+
+.ev-text-btn {
+    padding: 4px 8px;
+    border: 1px solid var(--ev-line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ev-dim);
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ev-text-btn:hover { color: var(--ev-text); background: #16233a; }
+
+/* ── 오류 ──────────────────────────────────────────────────────────────── */
+
+.ev-error {
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    background: #2a1414;
+    border-top: 1px solid #6b2a2a;
+    color: #ffc9c9;
+    font-size: 11px;
+    word-break: break-word;
+}
+
+/* ── 원본으로 돌아갔을 때의 알림 띠 ───────────────────────────────────── */
+/* 격리 월드가 붙인다(실행기는 이미 내려갔다). 작품 위에 떠 있다. */
+
+.ev-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid #22304a;
+    border-radius: 8px;
+    background: #0b1220f2;
+    color: #dce8fb;
+    font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+    font-size: 11px;
+    line-height: 1.35;
+    box-shadow: 0 4px 14px #0008;
+}
+
+.ev-badge-text { flex: 1 1 auto; }
+
+.ev-badge-retry {
+    flex: 0 0 auto;
+    padding: 3px 7px;
+    border: 1px solid #4a3a1d;
+    border-radius: 5px;
+    background: #2e2410;
+    color: #ffb545;
+    font: inherit;
+    cursor: pointer;
+}
+
+.ev-badge-retry:hover { background: #3c2f14; }
+
+.ev-badge-close {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #7c90ae;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ev-badge-close:hover { color: #dce8fb; background: #22304a; }
+
+/* ── Dorongi 4 실행기 UI ──────────────────────────────────────────────── */
+
+.ev-player {
+    --ev-ease: cubic-bezier(.22, 1, .36, 1);
+    --ev-fast: 150ms;
+    --ev-normal: 260ms;
+}
+
+.ev-cover {
+    z-index: 50;
+    padding: clamp(18px, 4vw, 48px);
+    background: rgba(4, 12, 24, .5);
+    isolation: isolate;
+}
+
+.ev-cover-art {
+    opacity: .78;
+    filter: saturate(.82) brightness(.55) blur(1px);
+    transform: scale(1.025);
+    transition: filter .6s var(--ev-ease), transform 1.2s var(--ev-ease);
+}
+
+.ev-cover::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+        radial-gradient(circle at 50% 38%, rgba(25, 47, 75, .12), rgba(4, 12, 24, .62) 68%),
+        linear-gradient(180deg, rgba(8, 19, 34, .12), rgba(5, 13, 26, .7));
+}
+
+.ev-cover-card {
+    position: relative;
+    width: min(620px, calc(100% - 24px));
+    max-height: calc(100% - 24px);
+    box-sizing: border-box;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px clamp(16px, 3vw, 30px) 12px;
+    border: 1px solid rgba(126, 210, 255, .32);
+    border-radius: 24px;
+    background: linear-gradient(155deg, rgba(17, 34, 55, .91), rgba(5, 18, 35, .94));
+    box-shadow: 0 28px 80px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .06);
+    backdrop-filter: blur(18px) saturate(1.18);
+    animation: ev-card-in .48s var(--ev-ease) both;
+}
+
+@keyframes ev-card-in {
+    from { opacity: 0; transform: translateY(18px) scale(.975); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.ev-cover-logo {
+    position: static;
+    width: 58px;
+    height: 58px;
+    flex: 0 0 auto;
+    border-radius: 22px;
+    transform: none;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .38), 0 0 24px rgba(53, 214, 198, .11);
+}
+
+.ev-cover-title {
+    max-width: 100%;
+    margin: 1px 0 0;
+    overflow: hidden;
+    color: #edf6ff !important;
+    font-size: clamp(18px, 3vw, 25px);
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ev-cover-description,
+.ev-cover-line { margin: 0; }
+.ev-cover-description { color: #a8bdd8; font-size: 13px; }
+.ev-cover-line { color: #72dccf; font-size: 11px; }
+
+.ev-cover-stats {
+    margin-top: 0;
+    padding: 5px 10px;
+    gap: 18px;
+    border-radius: 999px;
+    background: rgba(5, 16, 31, .62);
+    border: 1px solid rgba(255, 255, 255, .08);
+}
+
+.ev-cover-options {
+    width: 100%;
+    box-sizing: border-box;
+    display: block;
+    padding: 8px 10px;
+    text-align: left;
+    background: rgba(3, 14, 28, .68);
+    border-color: rgba(131, 183, 226, .18);
+}
+
+.ev-cover-tier-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 2px 5px;
+}
+.ev-cover-tier-label strong { color: var(--ev-text); font-size: 12px; }
+.ev-cover-tier-label span { color: var(--ev-dim); font-size: 10px; }
+.ev-cover-tier-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid #2c4565;
+    border-radius: 12px;
+}
+.ev-cover-tier {
+    min-height: 34px;
+    border: 0;
+    border-left: 1px solid #263c59;
+    background: rgba(14, 31, 52, .82);
+    color: #98abc5;
+    font: 600 11px/1 var(--ev-mono);
+    cursor: pointer;
+    transition: color var(--ev-fast) ease, background var(--ev-normal) var(--ev-ease),
+        box-shadow var(--ev-normal) var(--ev-ease), transform var(--ev-fast) ease;
+}
+.ev-cover-tier:first-child { border-left: 0; }
+.ev-cover-tier:hover { color: #e7f5ff; background: #193451; }
+.ev-cover-tier:active { transform: scale(.96); }
+.ev-cover-tier.is-on {
+    color: #032021;
+    background: linear-gradient(135deg, #66f1e1, #24cad4);
+    box-shadow: 0 0 24px rgba(50, 227, 218, .34), inset 0 1px rgba(255,255,255,.55);
+}
+.ev-cover-recommend { margin: 5px 2px 0; color: #7f96b3; font-size: 10px; }
+
+.ev-cover-notices {
+    position: absolute;
+    z-index: 88;
+    top: 10px;
+    left: 50%;
+    width: min(560px, calc(100% - 24px));
+    transform: translateX(-50%);
+    display: grid;
+    gap: 5px;
+    pointer-events: auto;
+}
+.ev-cover-notice {
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    box-sizing: border-box;
+    padding: 5px 7px 5px 10px;
+    border: 1px solid rgba(255, 189, 92, .34);
+    border-radius: 10px;
+    background: rgba(67, 43, 18, .58);
+    color: #f5d6a2;
+    font-size: 10px;
+    text-align: left;
+    animation: ev-settings-open .3s var(--ev-ease) both;
+}
+.ev-cover-notice.is-tess {
+    border-color: rgba(99, 234, 221, .27);
+    background: rgba(13, 65, 67, .42);
+    color: #a9eee8;
+}
+.ev-cover-notice.is-touch {
+    border-color: rgba(134, 180, 255, .3);
+    background: rgba(22, 46, 82, .72);
+    color: #c7dcff;
+}
+.ev-cover-notice button {
+    flex: 0 0 auto;
+    padding: 5px 8px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font: 700 9px inherit;
+    cursor: pointer;
+    transition: transform var(--ev-fast) var(--ev-ease), background var(--ev-fast), color var(--ev-fast);
+}
+.ev-cover-notice button:hover { background: rgba(255,255,255,.1); transform: translateY(-1px); }
+.ev-cover-notice button:active { transform: scale(.96); }
+
+.ev-go {
+    width: min(440px, 92%);
+    justify-content: center;
+    margin-top: 2px;
+    padding: 13px 22px;
+    border: 0;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #6af4e5, #22ccd4);
+    color: #04252a;
+    font-size: 17px;
+    font-weight: 800;
+    box-shadow: 0 12px 34px rgba(22, 219, 208, .22);
+    transition: transform var(--normal, 260ms) var(--ev-ease), box-shadow var(--ev-normal) var(--ev-ease), filter var(--ev-fast) ease;
+}
+.ev-go:hover { background: linear-gradient(135deg, #86fff0, #36dfe5); transform: translateY(-2px); box-shadow: 0 16px 42px rgba(22, 219, 208, .34); }
+.ev-go:active { transform: translateY(0) scale(.985); }
+.ev-cover-quick { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.ev-cover-quick-button {
+    padding: 6px 10px;
+    border: 1px solid #294865;
+    border-radius: 999px;
+    background: rgba(9, 28, 48, .82);
+    color: #a9bdd5;
+    font: 10px inherit;
+    cursor: pointer;
+    transition: color var(--ev-fast), border-color var(--ev-fast), background var(--ev-fast), transform var(--ev-fast);
+}
+.ev-cover-quick-button:hover { color: #6cebdd; border-color: #338f8a; transform: translateY(-1px); }
+.ev-cover-quick-button[aria-checked="true"] { color: #051f22; border-color: #53e3d8; background: #58ded3; }
+.ev-cover-settings {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+    border: 0;
+    background: transparent;
+    color: #aabbd1;
+    font: inherit;
+    cursor: pointer;
+    transition: color var(--ev-fast), transform var(--ev-fast);
+}
+.ev-cover-settings:hover { color: #63eadd; transform: translateX(2px); }
+.ev-cover-settings:disabled { opacity: .45; cursor: wait; transform: none; }
+.ev-cover-settings svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+.ev-hud { z-index: 20; pointer-events: auto; }
+.ev-fps { display: none; }
+.ev-player.show-diagnostics .ev-fps { display: inline-flex; }
+.ev-chip { display: none; }
+
+.ev-dock {
+    min-height: 42px;
+    box-sizing: border-box;
+    padding: 7px 12px;
+    background: linear-gradient(180deg, rgba(14, 29, 49, .9), rgba(8, 20, 38, .96));
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, .2);
+    transition: transform var(--ev-normal) var(--ev-ease), background var(--ev-normal);
+}
+
+/* The launch card already owns the pre-run controls. Reserving the runtime
+   dock below it shortened Entry's 16:9 viewport and clipped the card bottom. */
+.ev-player.is-idle .ev-dock { display: none; }
+.ev-btn, .ev-text-btn, .ev-select, .ev-setting-action, .ev-setting-reset, .ev-cover-settings {
+    -webkit-tap-highlight-color: transparent;
+}
+.ev-btn {
+    width: 32px;
+    height: 30px;
+    border-radius: 9px;
+    transition: color var(--ev-fast), background var(--ev-fast), border-color var(--ev-fast),
+        transform var(--ev-fast) var(--ev-ease), box-shadow var(--ev-normal) var(--ev-ease);
+}
+.ev-btn:hover:not(:disabled) { transform: translateY(-1px); border-color: #3d5878; box-shadow: 0 6px 16px rgba(0,0,0,.22); }
+.ev-btn:active:not(:disabled) { transform: translateY(0) scale(.94); }
+.ev-btn.is-on { color: #55e4d5; border-color: #247d78; background: #123c3a; }
+.ev-control-btn { min-width: 88px; }
+.ev-select { transition: border-color var(--ev-fast), background var(--ev-fast), box-shadow var(--ev-fast); }
+.ev-select:hover, .ev-select:focus { border-color: #3a607f; background: #142743; box-shadow: 0 0 0 3px rgba(53, 214, 198, .08); outline: none; }
+
+/* 설정 drawer */
+.ev-settings-shade {
+    position: absolute;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    justify-content: flex-end;
+    background: rgba(2, 8, 17, .38);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .28s var(--ev-ease), background .28s var(--ev-ease);
+}
+.ev-settings-shade.is-open { opacity: 1; pointer-events: auto; }
+.ev-settings-shade.is-closing { pointer-events: none; }
+.ev-settings-panel {
+    width: min(410px, 92%);
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid rgba(104, 202, 224, .3);
+    background: linear-gradient(160deg, rgba(15, 34, 57, .985), rgba(5, 18, 35, .99));
+    box-shadow: -24px 0 70px rgba(0,0,0,.42);
+    opacity: .82;
+    transform: translateX(34px);
+    transition: transform .34s var(--ev-ease), opacity .28s ease, box-shadow .34s var(--ev-ease);
+}
+.ev-settings-shade.is-open .ev-settings-panel { opacity: 1; transform: translateX(0); }
+@keyframes ev-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ev-drawer-in { from { transform: translateX(28px); opacity: .35; } to { transform: translateX(0); opacity: 1; } }
+.ev-settings-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 18px 15px;
+    border-bottom: 1px solid rgba(118, 169, 210, .18);
+}
+.ev-settings-head h3 { margin: 0; color: #63eadd; font-size: 19px; }
+.ev-settings-head p { margin: 3px 0 0; color: #8298b4; font-size: 11px; }
+.ev-settings-body {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 12px;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+.ev-settings-body::-webkit-scrollbar { width: 0; height: 0; }
+.ev-settings-section {
+    margin-bottom: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(109, 159, 201, .16);
+    border-radius: 13px;
+    background: rgba(5, 18, 35, .42);
+    transition: border-color var(--ev-normal), background var(--ev-normal), box-shadow var(--ev-normal);
+}
+.ev-settings-section[open] { border-color: rgba(59, 211, 205, .25); background: rgba(8, 24, 43, .72); box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.ev-settings-section[open]:not([data-animating="1"]) { overflow: visible; }
+.ev-settings-section[open]:not([data-animating="1"]) > .ev-settings-group { overflow: visible; }
+.ev-settings-section summary {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    position: relative;
+    padding: 12px 38px 12px 13px;
+    cursor: pointer;
+    list-style: none;
+    transition: background var(--ev-fast), color var(--ev-fast);
+}
+.ev-settings-section summary::-webkit-details-marker { display: none; }
+.ev-settings-section summary::after { content: "⌄"; position: absolute; right: 15px; top: 14px; color: #7590ad; transition: transform var(--ev-normal) var(--ev-ease), color var(--ev-fast); }
+.ev-settings-section[open] summary::after { transform: rotate(180deg); color: #5fe9dd; }
+.ev-settings-section summary:hover { background: rgba(41, 82, 112, .18); }
+.ev-settings-section summary:active { background: rgba(48, 111, 130, .24); }
+.ev-settings-section summary:focus-visible {
+    outline: 2px solid rgba(99, 234, 221, .75);
+    outline-offset: -2px;
+}
+.ev-settings-section summary strong { color: #dce8fb; font-size: 13px; }
+.ev-settings-section summary small { color: #7289a7; font-size: 10px; }
+.ev-settings-group { overflow: hidden; padding: 0 11px 11px; animation: ev-settings-open .24s var(--ev-ease) both; }
+@keyframes ev-settings-open { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+.ev-setting-row {
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 2px;
+    border-top: 1px solid rgba(126, 160, 197, .1);
+}
+.ev-setting-row:first-child { border-top: 0; }
+.ev-setting-row.is-revealed {
+    border-radius: 10px;
+    background: rgba(56, 220, 205, .12);
+    box-shadow: inset 0 0 0 1px rgba(85, 235, 222, .38), 0 0 22px rgba(47, 214, 201, .12);
+    animation: ev-setting-reveal 1.5s var(--ev-ease) both;
+}
+@keyframes ev-setting-reveal {
+    0%, 100% { transform: translateX(0); }
+    18% { transform: translateX(-3px); }
+    36% { transform: translateX(2px); }
+}
+.ev-setting-copy { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ev-setting-copy strong { color: #d8e5f7; font-size: 12px; font-weight: 650; }
+.ev-setting-copy small { color: #7187a3; font-size: 9px; line-height: 1.35; }
+.ev-setting-picker { position: relative; flex: 0 0 auto; }
+.ev-setting-select {
+    flex: 0 0 auto;
+    max-width: 150px;
+    min-width: 108px;
+    height: 32px;
+    border: 1px solid #2a4564;
+    border-radius: 9px;
+    padding: 0 28px 0 9px;
+    background: #0c2039;
+    color: #dce8fb;
+    font: 10px var(--ev-mono);
+    outline: none;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color var(--ev-fast), box-shadow var(--ev-fast), transform var(--ev-fast), background-color var(--ev-fast), color var(--ev-fast);
+}
+.ev-setting-select:hover, .ev-setting-select:focus { border-color: #3fcfc5; background-color: #12304a; box-shadow: 0 0 0 3px rgba(63,207,197,.1); transform: translateY(-1px); }
+.ev-setting-menu {
+    position: absolute;
+    z-index: 140;
+    right: 0;
+    top: calc(100% + 6px);
+    min-width: 100%;
+    padding: 5px;
+    border: 1px solid #31516f;
+    border-radius: 10px;
+    background: rgba(8, 25, 45, .99);
+    box-shadow: 0 14px 34px rgba(0,0,0,.42);
+    opacity: 0;
+    transform: translateY(-5px) scale(.97);
+    transform-origin: right top;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .22s var(--ev-ease);
+}
+.ev-setting-menu.is-open { opacity: 1; transform: none; pointer-events: auto; }
+.ev-setting-option {
+    display: block;
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #a9bdd5;
+    font: 10px var(--ev-mono);
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color var(--ev-fast), background var(--ev-fast), transform var(--ev-fast);
+}
+.ev-setting-option:hover, .ev-setting-option:focus { color: #e9ffff; background: rgba(50, 207, 197, .16); outline: none; transform: translateX(2px); }
+.ev-setting-option.is-selected { color: #65eade; background: rgba(43, 187, 181, .12); }
+.ev-setting-range-row { flex-wrap: wrap; }
+.ev-setting-range { width: 116px; accent-color: #35d6c6; cursor: pointer; }
+.ev-setting-range-value { min-width: 34px; color: #74e7dc; font: 10px var(--ev-mono); text-align: right; }
+.ev-setting-check { position: absolute; opacity: 0; pointer-events: none; }
+.ev-switch {
+    position: relative;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 22px;
+    border: 1px solid #314a67;
+    border-radius: 999px;
+    background: #14243a;
+    cursor: pointer;
+    transition: background .3s var(--ev-ease), border-color .3s, box-shadow .3s;
+}
+.ev-switch::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #8093aa;
+    box-shadow: 0 2px 6px rgba(0,0,0,.32);
+    transition: transform .32s var(--ev-ease), background .25s, box-shadow .3s;
+}
+.ev-setting-check:checked + .ev-switch { background: #146b69; border-color: #32d7cb; box-shadow: 0 0 16px rgba(50,215,203,.16); }
+.ev-setting-check:checked + .ev-switch::after { transform: translateX(18px); background: #bafff8; box-shadow: 0 0 10px rgba(89,245,232,.45); }
+.ev-setting-check:focus-visible + .ev-switch { outline: 2px solid #72e8df; outline-offset: 2px; }
+
+/* Every clickable surface uses the same quick, soft press response. */
+.ev-go, .ev-cover-settings, .ev-cover-tier, .ev-btn,
+.ev-setting-action, .ev-setting-reset, .ev-settings-section summary {
+    will-change: transform, filter, background-color, border-color;
+}
+.ev-go:focus-visible, .ev-cover-settings:focus-visible, .ev-cover-tier:focus-visible,
+.ev-btn:focus-visible, .ev-setting-action:focus-visible, .ev-setting-reset:focus-visible {
+    outline: 2px solid #72e8df;
+    outline-offset: 2px;
+}
+.ev-setting-action, .ev-setting-reset {
+    width: 100%;
+    margin-top: 7px;
+    padding: 9px 11px;
+    border: 1px solid #294563;
+    border-radius: 9px;
+    background: #102540;
+    color: #b9cbe0;
+    font: 11px inherit;
+    cursor: pointer;
+    transition: color var(--ev-fast), border-color var(--ev-fast), background var(--ev-fast), transform var(--ev-fast);
+}
+.ev-setting-action:hover, .ev-setting-reset:hover { color: #61eadd; border-color: #2e8d8a; background: #12313f; transform: translateY(-1px); }
+.ev-setting-action:active, .ev-setting-reset:active { transform: scale(.985); }
+.ev-diagnostic-readout { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 2px 0 0; }
+.ev-diagnostic-readout div { padding: 8px; border-radius: 8px; background: #081a30; }
+.ev-diagnostic-readout dt { color: #6f86a3; font-size: 9px; }
+.ev-diagnostic-readout dd { margin: 2px 0 0; color: #dce8fb; font: 11px var(--ev-mono); }
+.ev-settings-foot { padding: 11px 16px 13px; border-top: 1px solid rgba(118,169,210,.16); }
+.ev-settings-foot span { display: block; margin-top: 6px; color: #667d99; font-size: 9px; text-align: center; }
+.ev-setting-reset { margin: 0; background: transparent; }
+
+@media (max-width: 720px) {
+    .ev-cover-card { width: min(96%, 560px); padding: 18px 14px 14px; border-radius: 18px; }
+    .ev-cover-logo { width: 60px; height: 60px; border-radius: 16px; }
+    .ev-cover-description, .ev-cover-stats { display: none; }
+    .ev-cover-tier { min-height: 36px; font-size: 9px; }
+    .ev-dock-mid .ev-select-label { display: none; }
+    .ev-control-btn { min-width: 34px; width: 34px; padding: 0; }
+    .ev-control-btn span { display: none; }
+    .ev-dock { gap: 5px; padding: 5px 7px; }
+    .ev-dock-mid { gap: 5px; }
+}
+
+@container (max-height: 430px) {
+    .ev-cover { padding: 6px; }
+    .ev-cover-card { gap: 3px; padding: 7px 12px 6px; border-radius: 17px; }
+    .ev-cover-logo { width: 40px; height: 40px; border-radius: 12px; }
+    .ev-cover-card:has(.ev-cover-notices:not([hidden])) .ev-cover-logo { display: none; }
+    .ev-cover-title { font-size: 17px; }
+    .ev-cover-description, .ev-cover-line, .ev-cover-stats { display: none; }
+    .ev-cover-options { padding: 6px 8px; }
+    .ev-cover-tier { min-height: 29px; }
+    .ev-go { padding: 9px 18px; font-size: 14px; }
+    .ev-cover-settings { padding: 3px 8px; }
+    .ev-cover-notice { min-height: 27px; padding-block: 3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ev-player *, .ev-player *::before, .ev-player *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .001ms !important;
+    }
+}

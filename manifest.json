@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Dorongi",
+  "version": "4.0.0",
+  "description": "엔트리 작품을 Eniwan의 고속 실행기 Dorongi로 변환해 그 자리에서 실행합니다.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Dorongi",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "permissions": ["storage"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self'"
+  },
+  "host_permissions": ["https://playentry.org/*"],
+  "content_scripts": [{
+    "matches": ["https://playentry.org/*"],
+    "exclude_matches": ["https://playentry.org/iframe/*"],
+    "js": ["content.js"],
+    "run_at": "document_start",
+    "all_frames": false
+  }],
+  "web_accessible_resources": [{
+    "resources": ["page/*", "vendor/*", "player.css", "Dorongi.png"],
+    "matches": ["https://playentry.org/*"]
+  }]
+}
