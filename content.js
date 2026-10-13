@@ -36,6 +36,7 @@ const DEFAULTS = {
     tessMode: 'auto',
     dutMode: false,
     dororongMode: false,
+    axolotlMode: false,
     diagnostics: false,
     volume: 100,
 };
@@ -56,6 +57,7 @@ function sanitizeSettings(raw) {
         tessMode: pick(source.tessMode, ['auto', 'on', 'off'], 'auto'),
         dutMode: source.dutMode === true,
         dororongMode: source.dororongMode === true,
+        axolotlMode: source.axolotlMode === true,
         diagnostics: source.diagnostics === true,
         volume: Math.max(0, Math.min(100, Math.round(Number(source.volume ?? 100)))),
     };
@@ -314,6 +316,7 @@ api.storage.onChanged.addListener((changes, area) => {
     if ('tessMode' in changes) settings.tessMode = sanitizeSettings({ tessMode: changes.tessMode.newValue }).tessMode;
     if ('dutMode' in changes) settings.dutMode = changes.dutMode.newValue === true;
     if ('dororongMode' in changes) settings.dororongMode = changes.dororongMode.newValue === true;
+    if ('axolotlMode' in changes) settings.axolotlMode = changes.axolotlMode.newValue === true;
     if ('diagnostics' in changes) settings.diagnostics = changes.diagnostics.newValue === true;
     if ('volume' in changes) settings.volume = Math.max(0,
         Math.min(100, Math.round(Number(changes.volume.newValue ?? 100))));

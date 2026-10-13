@@ -401,6 +401,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         tessMode: ['auto', 'on', 'off'].includes(settings.tessMode) ? settings.tessMode : 'auto',
         dutMode: settings.dutMode === true,
         dororongMode: settings.dororongMode === true,
+        axolotlMode: settings.axolotlMode === true,
         diagnostics: settings.diagnostics === true,
         volume: Math.max(0, Math.min(100, Math.round(Number(settings.volume ?? 100)))),
     };
@@ -442,6 +443,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             tessMode: current.tessMode,
             dutMode: current.dutMode,
             dororongMode: current.dororongMode,
+            axolotlMode: current.axolotlMode,
             diagnostics: current.diagnostics,
             volume: current.volume,
         },
@@ -488,9 +490,9 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         return group;
     }
 
-    const executionSettings = settingsSection('실행', '연산 예산과 화면 갱신', true);
-    const settingsCompute = settingSelect(executionSettings, '연산 규모',
-        '3단계는 일반 작품, 4단계는 대형 3D, 5단계는 극한 계산용입니다.',
+    const executionSettings = settingsSection('실행', '성능 프로필과 실행 속도', true);
+    const settingsCompute = settingSelect(executionSettings, '성능 프로필',
+        '모든 단계가 같은 고속 엔진을 사용하며, 단계가 높을수록 처리량과 캐시 한도가 커집니다.',
         [['0', '자동 추천'], ...COMPUTE_LEVELS.map((v) => [String(v), `${v}단계`])],
         String(current.computeSetting), (value) => {
             current.computeSetting = Number(value);
@@ -590,11 +592,13 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             runtime?.setDutCompatibility(value);
             persistSettings();
         });
-    const axolotlModeToggle = settingToggle(experimentalSettings, 'AXOLOTL MODE · 준비 중',
+    const axolotlModeToggle = settingToggle(experimentalSettings, 'AXOLOTL MODE',
         '일부 반복 지연을 생략해 연산 성능의 한계에 도전해요. 대규모 계산에 적합한 실험적 기능이며, 일반 게임의 동작이 달라질 수 있어요.',
-        false, () => {});
-    axolotlModeToggle.disabled = true;
-    axolotlModeToggle.closest('.ev-setting-row')?.classList.add('is-disabled');
+        current.axolotlMode, (value) => {
+            current.axolotlMode = value;
+            runtime?.setAxolotlMode(value);
+            persistSettings();
+        });
     const forceToggle = settingToggle(experimentalSettings, '미지원 블록 무시하고 강행',
         '옮기지 못한 블록을 제외하므로 작품 결과가 달라질 수 있습니다.',
         current.force === true, (value) => {
@@ -1059,7 +1063,8 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         if (diagFrame) diagFrame.textContent = `${m.frameMs.toFixed(1)} ms`;
         if (diagTier) diagTier.textContent = `T${lastStats.tier || runtime?.analysis?.tier || '—'}`;
         if (diagFaces) diagFaces.textContent = fmtInt(m.triangles || 0);
-        if (runtime?.running && current.computeSetting === 0) {
+        // [사용자 요청] 자동 연산 규모 실시간 승격/수정 기능 비활성화 (computeSetting === 0 자동 모드에서도 동적 단계 승격 차단)
+        if (false && runtime?.running && current.computeSetting === 0) {
             // 낮은 TPS만으로 단계를 올리지 않는다. 한 논리 tick을 여러 rAF로
             // 나누는 작품은 화면은 부드러운데 TPS만 낮을 수 있다. 실제 한 화면의
             // 메인 스레드 점유가 길게 이어질 때만 예산을 올린다.
@@ -1361,6 +1366,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         });
         runtime.setComputeLevel(current.computeLevel);
         runtime.setTurbo(current.turbo);
+        runtime.setAxolotlMode(current.axolotlMode);
         syncDororongMode();
         runtime.setVolume(current.volume);
         buildDockControls();
@@ -1370,7 +1376,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
     /** 속도 조절은 작품이 올라간 뒤에만 의미가 있어서 그때 만든다. */
     function buildDockControls() {
         if (computeSelect) return;
-        computeSelect = dropdown(dockMid, '연산 규모', COMPUTE_LEVELS,
+        computeSelect = dropdown(dockMid, '성능 프로필', COMPUTE_LEVELS,
             (v) => `${v}단계`, current.computeLevel, (v) => {
                 current.computeLevel = v;
                 current.computeSetting = v;
@@ -1399,16 +1405,16 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         settingsCompute.value = String(current.computeSetting);
         const tierLabel = el('div', 'ev-cover-tier-label', coverOptions);
         const recommended = recommendedComputeLevel(analysis);
-        tierLabel.innerHTML = `<strong>연산 규모</strong><span>추천값: ${recommended}단계</span>`;
+        tierLabel.innerHTML = `<strong>성능 프로필</strong><span>추천값: ${recommended}단계</span>`;
         const tierRow = el('div', 'ev-cover-tier-row', coverOptions);
         const buttons = [];
         const computeLevelDescription = (value) => ({
-            1: '1단계 · 가벼운 이미지·텍스트 작품에 알맞습니다.',
-            2: '2단계 · 일반적인 상호작용과 가벼운 붓 작품에 알맞습니다.',
-            3: '3단계 · 대부분의 작품에 알맞은 표준 실행 예산입니다.',
-            4: '4단계 · 대형 3D와 무거운 반복 연산에 알맞습니다.',
-            5: '5단계 · 매우 복잡한 재귀·분석 작품에 더 많은 실행 예산을 줍니다.',
-        }[value] || '작품에 맞는 실행 예산을 선택합니다.');
+            1: '1단계 · 모든 안정 최적화를 갖춘 빠른 기본 프로필입니다.',
+            2: '2단계 · 상호작용을 유지하며 처리량과 캐시를 더 엽니다.',
+            3: '3단계 · 대부분의 작품을 위한 표준 고성능 프로필입니다.',
+            4: '4단계 · 대형 3D와 무거운 반복에 더 큰 한도를 제공합니다.',
+            5: '5단계 · 실행 경로는 유지하며 안정 한도를 최대로 엽니다.',
+        }[value] || '같은 고속 엔진에서 자원 한도를 선택합니다.');
         let recommend = null;
         const selectTier = (value) => {
             for (const button of buttons) button.classList.toggle('is-on', Number(button.dataset.value) === value);
@@ -1418,7 +1424,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             button.type = 'button';
             button.dataset.value = String(value);
             button.textContent = `${value}단계`;
-            button.title = `${value}단계 연산 예산`;
+            button.title = `${value}단계 성능 프로필`;
             button.onclick = () => {
                 current.computeLevel = value;
                 current.computeSetting = value;
@@ -1622,6 +1628,9 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             }
             current.dororongMode = next.dororongMode === true;
             syncDororongMode();
+            current.axolotlMode = next.axolotlMode === true;
+            axolotlModeToggle.checked = current.axolotlMode;
+            runtime?.setAxolotlMode(current.axolotlMode);
             if (next.renderMode !== current.renderMode) {
                 current.renderMode = next.renderMode;
                 renderModeSelect.value = next.renderMode;

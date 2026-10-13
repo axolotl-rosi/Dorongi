@@ -579,6 +579,9 @@ export class PenFramebuffer {
         this.completedTex = null;
         this.erasedThisTick = false;
         this.depth = null;
+        this.spareFbo = null;
+        this.spareTex = null;
+        this.spareDepth = null;
         this.width = 0;
         this.height = 0;
     }
@@ -600,22 +603,33 @@ export class PenFramebuffer {
         const gl = this.gl;
         this.width = w;
         this.height = h;
-        this.tex = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, this.tex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        // 합성할 때 1:1로 얹히므로 보간이 필요 없고, 무대 크기는 2의 제곱이
-        // 아니다 — WebGL1에서 그런 텍스처에 밉맵/REPEAT을 쓰면 검게 나온다.
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        this.depth = gl.createRenderbuffer();
-        gl.bindRenderbuffer(gl.RENDERBUFFER, this.depth);
-        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
-        this.fbo = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.tex, 0);
-        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.depth);
+        const makeTarget = () => {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            // 합성할 때 1:1로 얹히므로 보간이 필요 없고, 무대 크기는 2의 제곱이
+            // 아니다 — WebGL1에서 그런 텍스처에 밉맵/REPEAT을 쓰면 검게 나온다.
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            const depth = gl.createRenderbuffer();
+            gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+            gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+            const fbo = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+            return { fbo, tex, depth };
+        };
+        const front = makeTarget();
+        const spare = makeTarget();
+        this.fbo = front.fbo;
+        this.tex = front.tex;
+        this.depth = front.depth;
+        this.spareFbo = spare.fbo;
+        this.spareTex = spare.tex;
+        this.spareDepth = spare.depth;
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);
         return true;
@@ -634,9 +648,16 @@ export class PenFramebuffer {
     }
 
     /** 펜 모두 지우기. **투명**으로 지운다 — 배경색으로 지우면 합성할 때 모양을 덮는다. */
-    clear() {
-        // 지우기 직전 완성본을 백업하여 깜빡임을 방지한다.
-        this.commitCompleted();
+    clear(preserveCompleted = true) {
+        // 첫 지우기에서는 직전 완성 FBO와 빈 작업 FBO를 맞바꾼다. 이전 구현은
+        // copyTexSubImage2D로 화면 전체를 복사해 ray caster에서 GPU 동기화를 일으켰다.
+        // 포인터 교환이면 같은 완성 화면을 보존하면서 픽셀 복사는 0회다.
+        if (preserveCompleted && !this.erasedThisTick && this.spareFbo) {
+            this.completedTex = this.tex;
+            [this.fbo, this.spareFbo] = [this.spareFbo, this.fbo];
+            [this.tex, this.spareTex] = [this.spareTex, this.tex];
+            [this.depth, this.spareDepth] = [this.spareDepth, this.depth];
+        }
         this.erasedThisTick = true;
         const gl = this.gl;
         this.bind();
@@ -648,22 +669,8 @@ export class PenFramebuffer {
 
     /** 틱이 끝났을 때 완전한 프레임을 보존해 틱 진행 중 깜빡임을 막는다. */
     commitCompleted() {
-        const gl = this.gl;
-        if (!gl || !this.fbo || !this.width || !this.height || typeof gl.copyTexSubImage2D !== 'function') return;
-        if (!this.completedTex) {
-            this.completedTex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, this.completedTex);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.width, this.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        }
-        this.bind();
-        gl.bindTexture(gl.TEXTURE_2D, this.completedTex);
-        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, this.width, this.height);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-        this.unbind();
+        if (!this.fbo || !this.tex) return;
+        this.completedTex = this.tex;
         this.erasedThisTick = false;
     }
 
@@ -671,12 +678,17 @@ export class PenFramebuffer {
         const gl = this.gl;
         if (this.fbo) gl.deleteFramebuffer(this.fbo);
         if (this.tex) gl.deleteTexture(this.tex);
-        if (this.completedTex) gl.deleteTexture(this.completedTex);
         if (this.depth) gl.deleteRenderbuffer(this.depth);
+        if (this.spareFbo) gl.deleteFramebuffer(this.spareFbo);
+        if (this.spareTex) gl.deleteTexture(this.spareTex);
+        if (this.spareDepth) gl.deleteRenderbuffer(this.spareDepth);
         this.fbo = null;
         this.tex = null;
         this.completedTex = null;
         this.depth = null;
+        this.spareFbo = null;
+        this.spareTex = null;
+        this.spareDepth = null;
     }
 }
 

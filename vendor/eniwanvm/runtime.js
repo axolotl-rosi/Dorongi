@@ -41,6 +41,43 @@ import { ObjPreviewRenderer } from './obj-preview.js';
 export const STAGE_WIDTH = 480;
 export const STAGE_HEIGHT = 270;
 
+/** Stable profiles share one optimized execution path and only raise limits. */
+export const PERFORMANCE_PROFILES = Object.freeze([
+    Object.freeze({ level: 1, name: '고속 기본', stepBudget: 120_000, catchUpTicks: 8, frameWorkMs: 6, memoCacheLimit: 512 }),
+    Object.freeze({ level: 2, name: '상호작용', stepBudget: 220_000, catchUpTicks: 10, frameWorkMs: 8, memoCacheLimit: 1_024 }),
+    Object.freeze({ level: 3, name: '표준 고성능', stepBudget: 400_000, catchUpTicks: 16, frameWorkMs: 10, memoCacheLimit: 2_048 }),
+    Object.freeze({ level: 4, name: '대형 3D', stepBudget: 800_000, catchUpTicks: 20, frameWorkMs: 12, memoCacheLimit: 4_096 }),
+    Object.freeze({ level: 5, name: '극한 안정', stepBudget: 1_600_000, catchUpTicks: 24, frameWorkMs: 14, memoCacheLimit: 8_192 }),
+]);
+
+export function performanceProfile(level) {
+    const index = Math.max(0, Math.min(
+        PERFORMANCE_PROFILES.length - 1,
+        Math.round(Number(level) || 1) - 1,
+    ));
+    return PERFORMANCE_PROFILES[index];
+}
+
+export function stableOptimizerReport(profile) {
+    return {
+        level: profile.level,
+        profile: profile.name,
+        structuredNative: true,
+        numericSpecialization: true,
+        loopTco: true,
+        functionMemoization: true,
+        polygonBatching: true,
+        gpuMeshRetained: true,
+        doubleBufferedPen: true,
+        limits: {
+            stepBudget: profile.stepBudget,
+            catchUpTicks: profile.catchUpTicks,
+            frameWorkMs: profile.frameWorkMs,
+            memoCacheLimit: profile.memoCacheLimit,
+        },
+    };
+}
+
 /** 무대 배경색. 어두운 작품(horse-restore의 짙은 네이비)에 맞춰 둔다. */
 // Entry's stage is white when a project does not draw its own backdrop.
 const CLEAR_COLOR = [1, 1, 1, 1];
@@ -334,6 +371,8 @@ export class EniwanRuntime {
         this.tessCompatibilityMode = 'auto';
         this.dutCompatibility = false;
         this.dororongMode = false;
+        this.axolotlMode = false;
+        this._dororongBatchActive = false;
         this.tessScrollPending = false;
 
         this.running = false;
@@ -341,9 +380,11 @@ export class EniwanRuntime {
         this.logicHz = 60;
         this.turbo = 1;
         this.computeLevel = 3;
-        this.catchUpTicks = 4;
-        this.stepBudget = 500_000;
-        this.frameWorkMs = 7;
+        this.performanceProfile = performanceProfile(this.computeLevel);
+        this.catchUpTicks = this.performanceProfile.catchUpTicks;
+        this.stepBudget = this.performanceProfile.stepBudget;
+        this.frameWorkMs = this.performanceProfile.frameWorkMs;
+        this.activeOptimizers = stableOptimizerReport(this.performanceProfile);
 
         // mouseX/Y는 "커서가 무대 어디에 있나"(절대), deltaX/Y·wheel은
         // "지난 프레임 이후 얼마나 움직였나"(상대 누적)다. 1인칭 시점은
@@ -369,8 +410,8 @@ export class EniwanRuntime {
         this.lastRenderAt = 0;
         this.lastDrawAt = 0;
         this.minDrawGapMs = 0;
-        this.lastSampleAt = 0;
         this.framesDrawn = 0;
+        this.contentUpdates = 0;
         this.rafCalls = 0;
         this.ticksRun = 0;
         this.lastError = null;
@@ -379,7 +420,8 @@ export class EniwanRuntime {
         this.frameDrawCalls = 0;
 
         this.metrics = {
-            fps: 0, rafHz: 0, tickHz: 0, frameMs: 0, logicMs: 0, renderMs: 0,
+            fps: 0, presentationFps: 0, contentUpdateHz: 0, rafHz: 0, tickHz: 0,
+            frameMs: 0, logicMs: 0, renderMs: 0,
             vertices: 0, triangles: 0, drawCalls: 0, stepsPerTick: 0,
             liveThreads: 0, overruns: 0,
         };
@@ -416,9 +458,11 @@ export class EniwanRuntime {
             // 여유분을 넘겨 투영 배열을 완성하지 못한다. 512는 그 작품의
             // 재귀를 수용하면서도 clone-heavy 행의 레지스터 창을 유한하게 둔다.
             maxCallDepth: this.program.usesClones ? 1024 : 2048,
+            memoCacheLimit: this.performanceProfile.memoCacheLimit,
             nativeTier: this.nativeTier,
         });
         this.vm.tickMultiplier = this.turbo;
+        this.vm.axolotlMode = this.axolotlMode;
         if (project && project.eniwanGame && project.eniwanGame.type === 'feed-grow-fish') {
             if (this.nativeRenderer) this.nativeRenderer.dispose();
             let GameClass = FeedGrowGame;
@@ -577,6 +621,11 @@ export class EniwanRuntime {
         this.dororongMode = enabled === true;
     }
 
+    setAxolotlMode(enabled = false) {
+        this.axolotlMode = enabled === true;
+        if (this.vm) this.vm.axolotlMode = this.axolotlMode;
+    }
+
     setEnvironment({ boostMode = false, deviceType = 'desktop', touchSupported = false } = {}) {
         if (!this.vm) return;
         this.vm.host[18] = boostMode ? 1 : 0;
@@ -585,32 +634,27 @@ export class EniwanRuntime {
     }
 
     setComputeLevel(level) {
-        // A larger level gives a renderer more work per frame, but must not
-        // monopolize the browser for tens of millions of dispatches.
-        // Five useful bands are easier to choose than eight nearly identical
-        // ones. Level 3 is the default; 4 and 5 are for unusually large
-        // recursive/3D projects. Wall-clock budgets keep input and paint alive.
-        const budgets = [80_000, 150_000, 300_000, 600_000, 1_200_000];
-        const catches = [6, 10, 16, 20, 24];
-        const workMs = [5, 8, 10, 13, 16];
-        const i = Math.max(0, Math.min(budgets.length - 1, Math.round(Number(level) || 1) - 1));
-        this.computeLevel = i + 1;
-        this.stepBudget = budgets[i];
-        this.catchUpTicks = catches[i];
-        this.frameWorkMs = workMs[i];
-        // 저연산 모드(1~2단계)에서는 초당 16~8회 수준(8fps~12fps)으로 렌더 주기를
-        // 조율해 GPU/합성 부하를 덜고 연산에 시간을 집중하면서도 부드럽게 이어지도록 한다.
-        // 3단계 이상은 제한 없이 즉각 제출(0)한다.
-    // 합성은 실작품에서 0.1~0.2ms였다. 계산이 끝난 가벼운 작품까지
-    // 낮은 단계에서 8~22fps로 제한하지 않고 완성 화면은 rAF마다 낸다.
-        // Compute tiers control VM work, not visual smoothness. A slideshow or
-        // light sprite animation at tier 1 must still paint at display cadence.
-        // Explicit render-rate preferences remain available through renderHz.
+        // Every stable optimizer is available from level 1. Profiles only
+        // increase resource ceilings, so switching levels never selects a
+        // different execution meaning. AXOLOTL is the separate experimental
+        // mode that may relax scheduling semantics.
+        const profile = performanceProfile(level);
+        this.computeLevel = profile.level;
+        this.performanceProfile = profile;
+        this.stepBudget = profile.stepBudget;
+        this.catchUpTicks = profile.catchUpTicks;
+        this.frameWorkMs = profile.frameWorkMs;
+        this.activeOptimizers = stableOptimizerReport(profile);
+
+        // Presentation remains uncapped at every profile. A higher compute
+        // profile must not purchase throughput by deliberately lowering FPS.
         this.minDrawGapMs = 0;
-        // 화면 제출은 디스플레이의 표준 rAF에 맡긴다. 연산 프리셋이 화질이나
-        // 표시 주사율을 몰래 낮추지 않는다.
         this.renderHz = 0;
-        if (this.vm) this.vm.maxStepsPerTick = this.stepBudget;
+        if (this.vm) {
+            this.vm.maxStepsPerTick = this.stepBudget;
+            this.vm.computeLevel = this.computeLevel;
+            this.vm.setMemoCacheLimit(profile.memoCacheLimit);
+        }
     }
 
     setRenderHz(hz) { this.renderHz = hz; }
@@ -1084,13 +1128,15 @@ export class EniwanRuntime {
     }
 
     /**
-     * 도로롱 모드의 논리 tick 경계다. 화면에 즉시 제출하지는 않지만 현재 tick의
-     * 펜 명령을 끝내고 완성 텍스처를 보존한다. 다음 tick이 프레임 예산 중간에서
-     * 멈춰도 사용자는 마지막 완성 화면을 계속 보게 된다.
+     * 도로롱 모드의 논리 tick 경계다. 현재 tick의 배치만 FBO에 확정한다.
+     *
+     * 여기서 completedTex까지 매번 복사하면 화면 전체를 다시 그리는 작품은
+     * 논리 tick마다 모든 펜 레이어를 통째로 GPU 복사한다. 다음 tick이 펜을 지울
+     * 때 PenFramebuffer.clear()가 지우기 직전 완성본을 이미 보존하며, 지우지 않는
+     * 점진적 렌더러는 live tex를 보여 주므로 이 경계의 추가 복사는 필요 없다.
      */
     _commitCompletedPenTick() {
         this._finishPenLayer();
-        for (const layer of this.penLayers.values()) layer.commitCompleted?.();
         this._applyViewport();
     }
 
@@ -1104,7 +1150,7 @@ export class EniwanRuntime {
             this._penLayer(active)?.unbind();
             this._penBound = false;
         }
-        this._penLayer(objectIndex, true).clear();
+        this._penLayer(objectIndex, true).clear(!this._dororongBatchActive);
         this._activePenObject = null;
         if (wasBound) {
             const layer = this._penLayer(active, true);
@@ -1123,7 +1169,7 @@ export class EniwanRuntime {
             this._penLayer(this._activePenObject)?.unbind();
             this._penBound = false;
         }
-        for (const layer of this.penLayers.values()) layer.clear();
+        for (const layer of this.penLayers.values()) layer.clear(!this._dororongBatchActive);
         this._activePenObject = null;
         if (resume !== null) {
             const layer = this._penLayer(resume, true);
@@ -1305,7 +1351,7 @@ export class EniwanRuntime {
             // A catch-up batch cannot change mouseDown halfway through. Keep
             // press/release edges on separate logical frames.
             const hasPointerEdge = this.pointerEdgeQueue.length > 0;
-            const dororongBatch = this.dororongMode && !hasPointerEdge;
+            const dororongBatch = (this.dororongMode || this.axolotlMode) && !hasPointerEdge;
             const catchUpTicks = hasPointerEdge ? 1 : this.catchUpTicks;
             const mouseDownReadsBefore = this.vm.hostReadCounts[HOST_MOUSE_DOWN];
             const advance = () => this.vm.advance(
@@ -1313,11 +1359,22 @@ export class EniwanRuntime {
                 catchUpTicks,
                 this.frameWorkMs,
                 !dororongBatch,
-                dororongBatch ? () => this._commitCompletedPenTick() : null,
+                // The outer frame flushes the final visible tick once. Flushing
+                // every completed inner tick submits work that can never be
+                // presented and made CPU-bound pen projects slower in Dororong
+                // mode than in normal mode.
+                null,
+                this.axolotlMode && !hasPointerEdge,
             );
-            const ticks = this.objPreview
-                ? this.objPreview.withPresentationSuppressed(this.vm, advance)
-                : advance();
+            let ticks;
+            this._dororongBatchActive = dororongBatch;
+            try {
+                ticks = this.objPreview
+                    ? this.objPreview.withPresentationSuppressed(this.vm, advance)
+                    : advance();
+            } finally {
+                this._dororongBatchActive = false;
+            }
             const mouseDownReads = this.vm.hostReadCounts[HOST_MOUSE_DOWN] - mouseDownReadsBefore;
             this._finishPointerTick(ticks, mouseDownReads);
             // 작품이 틱 중에 요청한 것(복사·커서·락)을 여기서 한 번에 처리한다.
@@ -1399,6 +1456,7 @@ export class EniwanRuntime {
 
             this.ticksRun += ticks;
             this.framesDrawn += 1;
+            this.contentUpdates += 1;
             this._sample(frameStart, logicEnd - logicStart, performance.now() - logicEnd, now);
             if (this.hooks.onPaint) this.hooks.onPaint();
             if (interactive && this.hooks.onInputFrame) this.hooks.onInputFrame();
@@ -1444,9 +1502,12 @@ export class EniwanRuntime {
             this._initialSampleDone = true;
             const sampleTime = Math.max(1, elapsed);
             m.fps = this.framesDrawn > 0 ? (this.framesDrawn * 1000) / sampleTime : 60;
+            m.presentationFps = m.fps;
+            m.contentUpdateHz = (this.contentUpdates * 1000) / sampleTime;
             m.rafHz = this.rafCalls > 0 ? (this.rafCalls * 1000) / sampleTime : 60;
             m.tickHz = this.ticksRun > 0 ? (this.ticksRun * 1000) / sampleTime : 60;
             this.framesDrawn = 0;
+            this.contentUpdates = 0;
             this.rafCalls = 0;
             this.ticksRun = 0;
             this.lastSampleAt = now;

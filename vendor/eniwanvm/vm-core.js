@@ -199,16 +199,21 @@ function newPen() {
 export class EniwanVM {
     /**
      * @param {object} program compiler.js가 만든 프로그램
-     * @param {{sink?:object, logicHz?:number, maxStepsPerTick?:number, maxCallDepth?:number}} [options]
+     * @param {{sink?:object, logicHz?:number, maxStepsPerTick?:number, maxCallDepth?:number,
+     *          memoCacheLimit?:number}} [options]
      */
     constructor(program, options = {}) {
         this.program = program;
         this.sink = options.sink || nullSink;
         this.logicHz = options.logicHz || 60;
         this.tickMultiplier = 1;
+        // Explicit maximum-throughput mode. Normal execution stays tied to
+        // project time; this opt-in mode may run ahead and skip waits.
+        this.axolotlMode = false;
         // 한 틱이 무한 루프로 브라우저를 얼리는 걸 막는 상한. 넘으면 그 틱을
         // 중단하고 `overrun`을 올린다 — 조용히 멈추는 대신 숫자로 드러낸다.
         this.maxStepsPerTick = options.maxStepsPerTick || 4_000_000;
+        this.memoCacheLimit = Math.max(0, Math.trunc(Number(options.memoCacheLimit) || 4_096));
         this.maxCallDepth = options.maxCallDepth || 2048;
         this.workDeadline = 0;
 
@@ -580,6 +585,14 @@ export class EniwanVM {
             this.pens[i].x = this.entX[i];
             this.pens[i].y = this.entY[i];
         });
+    }
+
+    setMemoCacheLimit(limit) {
+        const next = Math.max(0, Math.trunc(Number(limit) || 0));
+        this.memoCacheLimit = next;
+        for (const cache of this.functionMemoCaches) {
+            if (cache && cache.size > next) cache.clear();
+        }
     }
 
     reset() {
@@ -1055,6 +1068,16 @@ export class EniwanVM {
         return value !== '' && Number.isFinite(n) ? n : String(value === undefined ? '' : value);
     }
 
+    _nativeListNumGet(listIndex, index) {
+        const list = this.lists[listIndex];
+        const at = Math.round(typeof index === 'number' ? index : entryNumber(index)) - 1;
+        if (at < 0 || at >= list.length) return 0;
+        const value = list[at];
+        return typeof value === 'number'
+            ? (Number.isFinite(value) ? value : 0)
+            : entryNumber(value);
+    }
+
     _nativeListInsert(listIndex, index, value) {
         const list = this.lists[listIndex];
         const at = Math.round(this._nativeNumValue(index)) - 1;
@@ -1090,7 +1113,93 @@ export class EniwanVM {
     _nativePenDown() { this.pen.down = true; }
     _nativePenUp() { this.pen.down = false; }
     _nativeSetPenColor(value) { this.pen.color = String(value ?? ''); }
+    _nativeSetFillColor(value) { this.pen.fillColor = String(value ?? ''); }
     _nativeSetPenThickness(value) { this.pen.thickness = Math.max(0, this._nativeNumValue(value)); }
+    _nativeSetPenOpacity(value) { this.pen.opacity = Math.max(0, Math.min(100, this._nativeNumValue(value))); }
+    _nativeMoveToRel(dx, dy) { this._moveTo(this.pen.x + this._nativeNumValue(dx), this.pen.y + this._nativeNumValue(dy)); }
+    _nativeEraseAll() { this.sink.clear(); }
+    _nativeFillBegin() {
+        this.pen.filling = true;
+        this.pen.path.length = 0;
+        this.pen.path.push(this.pen.x, this.pen.y);
+    }
+    _nativeFillEnd() {
+        if (this.pen.path.length >= 6) {
+            this.sink.fill(this.sink.consumesFillPathSynchronously
+                ? this.pen.path : this.pen.path.slice(), this.pen.fillColor,
+                1 - this.pen.fillOpacity / 100);
+            this.stats.fills += 1;
+            if (this.pen.down) {
+                const path = this.pen.path;
+                for (let k = 0; k + 3 < path.length; k += 2) {
+                    this.sink.line(path[k], path[k + 1], path[k + 2], path[k + 3],
+                        this.pen.thickness, this.pen.color,
+                        1 - this.pen.opacity / 100);
+                    this.stats.lines += 1;
+                }
+            }
+        }
+        this.pen.filling = false;
+        this.pen.path.length = 0;
+    }
+    _nativeMouseCoord(axis) {
+        return axis === 1 ? this.host[1] : this.host[0];
+    }
+    _nativeIsMouseDown() {
+        return this.host[2] ? 1 : 0;
+    }
+    _nativeIsKeyDown(code) {
+        return this.keys[code & 255] ? 1 : 0;
+    }
+    _nativeTimer() {
+        return this.host[3];
+    }
+    _nativeRand(lo, hi) {
+        const a = this._nativeNumValue(lo), b = this._nativeNumValue(hi);
+        if (Number.isInteger(a) && Number.isInteger(b)) {
+            const min = Math.min(a, b), max = Math.max(a, b);
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+        const min = Math.min(a, b), max = Math.max(a, b);
+        return min + Math.random() * (max - min);
+    }
+    _nativeRgbToHex(red, green, blue) {
+        const r = (this._nativeNumValue(red) & 255) << 16;
+        const g = (this._nativeNumValue(green) & 255) << 8;
+        const b = this._nativeNumValue(blue) & 255;
+        const hex = `#${((1 << 24) + r + g + b).toString(16).slice(1)}`;
+        return this.dutCompatibility ? hex.toUpperCase() : hex;
+    }
+    _nativeHexToRgb(hexValue, channel) {
+        let hex = String(hexValue ?? '');
+        if (!/^#[0-9a-f]{6}$/i.test(hex)) hex = '#000000';
+        const ch = { r: 0, g: 1, b: 2 }[String(channel ?? 'r').toLowerCase()] ?? 0;
+        const offset = 1 + ch * 2;
+        return parseInt(hex.slice(offset, offset + 2), 16);
+    }
+    _nativeDate(field) {
+        const d = new Date();
+        switch (field) {
+            case 0: return d.getFullYear();
+            case 1: return d.getMonth() + 1;
+            case 2: return d.getDate();
+            case 3: return d.getHours();
+            case 4: return d.getMinutes();
+            case 5: return d.getSeconds();
+            case 6: return d.getDay();
+            default: return 0;
+        }
+    }
+    _nativeChangeCase(value, upper) {
+        const text = String(value ?? '');
+        return upper ? text.toUpperCase() : text.toLowerCase();
+    }
+
+    _nativeDeadlineReached() {
+        if (this.workDeadline <= 0) return false;
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        return now >= this.workDeadline;
+    }
 
     _nativeEntityValue(property, objectIndex, entity) {
         const target = objectIndex < 0 ? entity : objectIndex;
@@ -1160,7 +1269,7 @@ export class EniwanVM {
     }
 
     _nativeReplace(value, find, replacement) {
-        return boundedText(String(value ?? '').replace(String(find ?? ''), String(replacement ?? '')));
+        return boundedReplace(value, find, replacement);
     }
     _nativeStringCount(value, needle) {
         const source = String(value ?? ''), search = String(needle ?? '');
@@ -2440,23 +2549,23 @@ export class EniwanVM {
                         const valueAt = (offset) => this._regValue(arg + offset);
                         let result;
                         switch (fn.arity) {
-                            case 0: result = native.run(this, ent); break;
-                            case 1: result = native.run(this, ent, valueAt(0)); break;
-                            case 2: result = native.run(this, ent, valueAt(0), valueAt(1)); break;
-                            case 3: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2)); break;
-                            case 4: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3)); break;
-                            case 5: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4)); break;
-                            case 6: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5)); break;
-                            case 7: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6)); break;
-                            case 8: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7)); break;
-                        case 9: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8)); break;
-                        case 10: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9)); break;
-                        case 11: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10)); break;
-                        case 12: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11)); break;
-                        case 13: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12)); break;
-                        case 14: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12), valueAt(13)); break;
-                        case 15: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12), valueAt(13), valueAt(14)); break;
-                        case 16: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12), valueAt(13), valueAt(14), valueAt(15)); break;
+                                case 0: result = native.run(this, ent); break;
+                                case 1: result = native.run(this, ent, valueAt(0)); break;
+                                case 2: result = native.run(this, ent, valueAt(0), valueAt(1)); break;
+                                case 3: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2)); break;
+                                case 4: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3)); break;
+                                case 5: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4)); break;
+                                case 6: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5)); break;
+                                case 7: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6)); break;
+                                case 8: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7)); break;
+                                case 9: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8)); break;
+                                case 10: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9)); break;
+                                case 11: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10)); break;
+                                case 12: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11)); break;
+                                case 13: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12)); break;
+                                case 14: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12), valueAt(13)); break;
+                                case 15: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12), valueAt(13), valueAt(14)); break;
+                                case 16: result = native.run(this, ent, valueAt(0), valueAt(1), valueAt(2), valueAt(3), valueAt(4), valueAt(5), valueAt(6), valueAt(7), valueAt(8), valueAt(9), valueAt(10), valueAt(11), valueAt(12), valueAt(13), valueAt(14), valueAt(15)); break;
                             default: result = undefined;
                         }
                         if (c >= 0) this._nativeStoreRegister(base + c, result === undefined ? 0 : result);
@@ -2513,8 +2622,10 @@ export class EniwanVM {
                         writes: profile.writeVars.map((v) => [v, this.varTag[v], this.varNum[v], this.varStr[v]]),
                     };
                     const cache = this.functionMemoCaches[memoFrame.functionIndex];
-                    if (cache.size >= 4096) cache.clear();
-                    cache.set(memoFrame.key, entry);
+                    if (this.memoCacheLimit > 0) {
+                        if (cache.size >= this.memoCacheLimit) cache.clear();
+                        cache.set(memoFrame.key, entry);
+                    }
                     this.callMemoFrames[memoIndex] = null;
                 }
                     if (retSlot >= 0) {
@@ -2618,7 +2729,8 @@ export class EniwanVM {
                     // 초를 **틱 수**로 바꿔서 센다. 벽시계를 쓰면 프레임이 밀릴
                     // 때 작품 속 시간이 로직 틱과 어긋난다(60틱=1초가 깨진다).
                     const sec = this._num(base + a);
-                    this.rowSleep[ti] = sec > 0 ? Math.round(sec * this.logicHz) : 0;
+                    this.rowSleep[ti] = !this.axolotlMode && sec > 0
+                        ? Math.round(sec * this.logicHz) : 0;
                     this.pc[ti] = pc;
                     this.base[ti] = base;
                     return steps;
@@ -2641,7 +2753,7 @@ export class EniwanVM {
                     // VM은 "무엇을 언제부터 얼마나"만 말한다.
                     if (sound) this.sink.sound(0, sound.src, this.volume, sound.name, from, dur,
                         this.entObject[ent], this.soundSpeed);
-                    if (c & SND_WAIT) {
+                    if ((c & SND_WAIT) && !this.axolotlMode) {
                         // 소리를 못 찾으면 기다리지 않는다 — 없는 소리에 영원히
                         // 걸려 있으면 "작품이 멈췄다"는 원인 모를 신고가 된다.
                         this.rowSleep[ti] = dur > 0 ? Math.round(dur * this.logicHz) : 0;
@@ -2987,7 +3099,7 @@ export class EniwanVM {
      * 죽음의 나선이 되므로, 한 번에 따라잡는 틱 수에 상한을 둔다.
      */
     advance(nowMs, maxTicksOverride, maxWorkMs = Infinity, stopAfterComplete = false,
-        onTickComplete = null) {
+        onTickComplete = null, runAhead = false) {
         if (this.lastNowMs < 0) { this.lastNowMs = nowMs; return 0; }
         let delta = nowMs - this.lastNowMs;
         this.lastNowMs = nowMs;
@@ -3005,8 +3117,9 @@ export class EniwanVM {
         const workStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.workDeadline = Number.isFinite(maxWorkMs) && maxWorkMs > 0 ? workStarted + maxWorkMs : 0;
         try {
-            while ((this.tickInProgress || this.accumulatorMs >= step) && chunks < maxTicks) {
-                if (!this.tickInProgress) this.accumulatorMs -= step;
+            while ((this.tickInProgress || this.accumulatorMs >= step || runAhead)
+                && chunks < maxTicks) {
+                if (!this.tickInProgress && this.accumulatorMs >= step) this.accumulatorMs -= step;
                 const result = this.runTickChunk();
                 if (result.complete) {
                     ran += 1;
@@ -3023,7 +3136,9 @@ export class EniwanVM {
         } finally {
             this.workDeadline = 0;
         }
-        if (this.accumulatorMs > step * maxTicks) this.accumulatorMs = 0;
+        // Preserve a bounded backlog. Clearing all pending time under load made
+        // high multipliers collapse back toward ordinary speed.
+        if (this.accumulatorMs > step * maxTicks) this.accumulatorMs = step * maxTicks;
         return ran;
     }
 

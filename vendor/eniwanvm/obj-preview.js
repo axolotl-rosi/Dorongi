@@ -157,8 +157,7 @@ export class ObjPreviewRenderer {
         this.suppressedNativeIndexes = new Set(program.functions.flatMap((fn, index) => {
             const source = fn.nativeSource || '';
             const isObjPresentationPass = fn.nativeRecursive
-                && (source.includes('_nativeList') || source.includes('_nativePen')
-                    || source.includes('_nativeLocate'));
+                && (source.includes('_nativePen') || source.includes('_nativeLocate'));
             return isObjPresentationPass ? [index] : [];
         }));
         this.buffer = gl.createBuffer();

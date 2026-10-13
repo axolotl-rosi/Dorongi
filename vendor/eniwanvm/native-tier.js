@@ -212,14 +212,17 @@ export function buildNativeFunctions(program) {
         program.code.length / INSTR_WORDS,
     );
     const compiled = new Array(functions.length).fill(null);
-    let blocked = false;
+    // Check if CSP or runtime environment forbids dynamic Function evaluation.
+    try {
+        Function('return 0;')();
+    } catch {
+        return { functions: compiled, blocked: true, count: 0 };
+    }
+
     for (let i = 0; i < functions.length; i += 1) {
         if (functions[i].nativeDisabled || functions[i].arity > 16) continue;
         const end = i + 1 < functions.length ? functions[i + 1].pc : firstThread;
-        const useStructured = Boolean(functions[i].nativeSource)
-            && (!functions[i].nativeExtended || functions[i].nativeRecursive
-                || functions[i].nativeLoop || requiredStructured.has(i));
-        const structured = useStructured ? functions[i].nativeSource : null;
+        const structured = functions[i].nativeSource || null;
         const product = structured
             ? {
                 source: structured,
@@ -236,29 +239,28 @@ export function buildNativeFunctions(program) {
                 source: product.source,
                 dependencies: product.dependencies || [],
             };
-        } catch {
-            blocked = true;
-            break;
+        } catch (err) {
+            // Isolate individual function compile error: leave compiled[i] = null.
+            // Do NOT discard other independent native functions.
+            compiled[i] = null;
         }
     }
-    if (blocked) compiled.fill(null);
-    else {
-        // Structured products may call other native functions. Keep the
-        // interpreter authoritative whenever any dependency did not pass the
-        // same safety/compilation checks, including transitive fallbacks.
-        let changed = true;
-        while (changed) {
-            changed = false;
-            for (let i = 0; i < compiled.length; i += 1) {
-                if (!compiled[i]) continue;
-                const dependencies = compiled[i].dependencies;
-                if (dependencies.some((index) => !compiled[index])) {
-                    compiled[i] = null;
-                    changed = true;
-                }
+
+    // Structured products may call other native functions. Keep the
+    // interpreter authoritative whenever any dependency did not pass the
+    // same safety/compilation checks, including transitive fallbacks.
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (let i = 0; i < compiled.length; i += 1) {
+            if (!compiled[i]) continue;
+            const dependencies = compiled[i].dependencies;
+            if (dependencies.some((index) => !compiled[index])) {
+                compiled[i] = null;
+                changed = true;
             }
         }
     }
-    return { functions: compiled, blocked, count: compiled.filter(Boolean).length };
+    return { functions: compiled, blocked: false, count: compiled.filter(Boolean).length };
 }
 

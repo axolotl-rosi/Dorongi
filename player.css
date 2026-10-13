@@ -757,6 +757,7 @@
     max-height: calc(100% - 24px);
     box-sizing: border-box;
     overflow: hidden;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1251,6 +1252,54 @@
     .ev-go { padding: 9px 18px; font-size: 14px; }
     .ev-cover-settings { padding: 3px 8px; }
     .ev-cover-notice { min-height: 27px; padding-block: 3px; }
+}
+
+/* Entry embeds can be only 480×270. The regular compact rule still left the
+   card 42px taller than that stage after the mode row was added, and hidden
+   overflow clipped the start button. This layout keeps every action visible
+   without introducing a scroll area on the launch screen. */
+@container (max-height: 330px) {
+    .ev-cover { padding: 4px; }
+    .ev-cover-card {
+        width: min(98%, 560px);
+        max-height: calc(100% - 8px);
+        gap: 1px;
+        padding: 4px 9px;
+        border-radius: 13px;
+    }
+    .ev-cover-logo, .ev-cover-description, .ev-cover-line,
+    .ev-cover-stats, .ev-cover-recommend { display: none; }
+    .ev-cover-title { margin: 0; font-size: 15px; line-height: 1.1; }
+    .ev-cover-options { padding: 4px 6px; }
+    .ev-cover-tier-label { margin-bottom: 2px; }
+    .ev-cover-tier-label span { display: none; }
+    .ev-cover-tier { min-height: 24px; }
+    .ev-cover-mode { margin-top: 3px; padding: 4px 7px; }
+    .ev-cover-mode-copy small { display: none; }
+    .ev-go { margin-top: 1px; padding: 7px 16px; border-radius: 11px; font-size: 13px; }
+    .ev-cover-quick { gap: 4px; }
+    .ev-cover-quick-button { padding: 3px 8px; }
+    .ev-cover-settings { padding: 2px 7px; }
+}
+
+/* Some Entry layouts reserve browser chrome around an already-small embed,
+   leaving less than 270px. Keep profile controls and the start action usable;
+   scrolling is only a last-resort fallback for these unusually short hosts. */
+@container (max-height: 260px) {
+    .ev-cover-card {
+        max-height: calc(100% - 4px);
+        padding: 2px 7px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        scrollbar-width: none;
+    }
+    .ev-cover-card::-webkit-scrollbar { display: none; }
+    .ev-cover-title, .ev-cover-quick { display: none; }
+    .ev-cover-options { padding: 3px 5px; }
+    .ev-cover-tier { min-height: 22px; }
+    .ev-cover-mode { margin-top: 2px; padding: 3px 6px; }
+    .ev-go { padding: 6px 14px; font-size: 12px; }
+    .ev-cover-settings { min-height: 20px; padding: 1px 6px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

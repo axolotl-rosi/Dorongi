@@ -48,6 +48,7 @@ function sanitizeSettings(raw) {
         tessMode: pick(s.tessMode, ['auto', 'on', 'off'], 'auto'),
         dutMode: s.dutMode === true,
         dororongMode: s.dororongMode === true,
+        axolotlMode: s.axolotlMode === true,
         diagnostics: s.diagnostics === true,
         volume: Number.isFinite(Number(s.volume))
             ? Math.max(0, Math.min(100, Math.round(Number(s.volume)))) : 100,
