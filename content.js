@@ -33,6 +33,7 @@ const DEFAULTS = {
     deviceType: 'auto',
     touchMode: 'auto',
     renderMode: 'auto',
+    renderQuality: 'auto',
     tessMode: 'auto',
     dutMode: false,
     dororongMode: false,
@@ -54,6 +55,7 @@ function sanitizeSettings(raw) {
         deviceType: pick(source.deviceType, ['auto', 'desktop', 'tablet', 'mobile'], 'auto'),
         touchMode: pick(source.touchMode, ['auto', 'on', 'off'], 'auto'),
         renderMode: pick(source.renderMode, ['auto', '60', '120', 'max'], 'auto'),
+        renderQuality: pick(source.renderQuality, ['auto', '1', '0.75', '0.5'], 'auto'),
         tessMode: pick(source.tessMode, ['auto', 'on', 'off'], 'auto'),
         dutMode: source.dutMode === true,
         dororongMode: source.dororongMode === true,
@@ -313,6 +315,7 @@ api.storage.onChanged.addListener((changes, area) => {
     if ('deviceType' in changes) settings.deviceType = sanitizeSettings({ deviceType: changes.deviceType.newValue }).deviceType;
     if ('touchMode' in changes) settings.touchMode = sanitizeSettings({ touchMode: changes.touchMode.newValue }).touchMode;
     if ('renderMode' in changes) settings.renderMode = sanitizeSettings({ renderMode: changes.renderMode.newValue }).renderMode;
+    if ('renderQuality' in changes) settings.renderQuality = sanitizeSettings({ renderQuality: changes.renderQuality.newValue }).renderQuality;
     if ('tessMode' in changes) settings.tessMode = sanitizeSettings({ tessMode: changes.tessMode.newValue }).tessMode;
     if ('dutMode' in changes) settings.dutMode = changes.dutMode.newValue === true;
     if ('dororongMode' in changes) settings.dororongMode = changes.dororongMode.newValue === true;
@@ -373,6 +376,10 @@ function sanitizeStats(raw) {
     };
     return {
         fps: n(raw.fps),
+        rafHz: n(raw.rafHz),
+        tickHz: n(raw.tickHz),
+        contentUpdateHz: n(raw.contentUpdateHz),
+        completedTickHz: n(raw.completedTickHz),
         frameMs: n(raw.frameMs),
         logicMs: n(raw.logicMs),
         renderMs: n(raw.renderMs),
@@ -383,6 +390,9 @@ function sanitizeStats(raw) {
         steps: n(raw.steps),
         name: typeof raw.name === 'string' ? raw.name.slice(0, 120) : '',
         running: raw.running === true,
+        renderScale: n(raw.renderScale),
+        backingWidth: n(raw.backingWidth),
+        backingHeight: n(raw.backingHeight),
     };
 }
 

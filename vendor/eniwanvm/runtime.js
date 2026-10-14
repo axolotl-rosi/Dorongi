@@ -46,8 +46,8 @@ export const PERFORMANCE_PROFILES = Object.freeze([
     Object.freeze({ level: 1, name: '고속 기본', stepBudget: 120_000, catchUpTicks: 8, frameWorkMs: 6, memoCacheLimit: 512 }),
     Object.freeze({ level: 2, name: '상호작용', stepBudget: 220_000, catchUpTicks: 10, frameWorkMs: 8, memoCacheLimit: 1_024 }),
     Object.freeze({ level: 3, name: '표준 고성능', stepBudget: 400_000, catchUpTicks: 16, frameWorkMs: 10, memoCacheLimit: 2_048 }),
-    Object.freeze({ level: 4, name: '대형 3D', stepBudget: 800_000, catchUpTicks: 20, frameWorkMs: 12, memoCacheLimit: 4_096 }),
-    Object.freeze({ level: 5, name: '극한 안정', stepBudget: 1_600_000, catchUpTicks: 24, frameWorkMs: 14, memoCacheLimit: 8_192 }),
+    Object.freeze({ level: 4, name: '대형 3D', stepBudget: 800_000, catchUpTicks: 20, frameWorkMs: 15, memoCacheLimit: 4_096 }),
+    Object.freeze({ level: 5, name: '극한 안정', stepBudget: 1_600_000, catchUpTicks: 24, frameWorkMs: 16, memoCacheLimit: 8_192 }),
 ]);
 
 export function performanceProfile(level) {
@@ -378,6 +378,14 @@ export class EniwanRuntime {
         this.running = false;
         this.renderHz = 60;             // 0 = 제한 없음(Max)
         this.logicHz = 60;
+        // CSS 무대 크기는 그대로 두고 WebGL backing store/FBO 해상도만 조절한다.
+        // auto는 GPU/표시 병목일 때만 천천히 낮추며 CPU 논리 병목에는 반응하지 않는다.
+        this.renderQualityMode = 'auto';
+        this.renderScale = 1;
+        this._qualitySlowSamples = 0;
+        this._qualityFastSamples = 0;
+        this._nativeSlowTickSamples = 0;
+        this._lastContinuationTick = 0;
         this.turbo = 1;
         this.computeLevel = 3;
         this.performanceProfile = performanceProfile(this.computeLevel);
@@ -430,6 +438,8 @@ export class EniwanRuntime {
     /** project.json을 분석 → 컴파일 → VM 생성. 실행은 start()에서. */
     async load(project, filename = '') {
         this.stop();
+        this._nativeSlowTickSamples = 0;
+        this._lastContinuationTick = 0;
         for (const layer of this.penLayers.values()) layer.dispose();
         this.penLayers.clear();
         this._activePenObject = null;
@@ -658,6 +668,45 @@ export class EniwanRuntime {
     }
 
     setRenderHz(hz) { this.renderHz = hz; }
+
+    setRenderQuality(mode = 'auto') {
+        const allowed = new Set(['auto', '1', '0.75', '0.5']);
+        this.renderQualityMode = allowed.has(String(mode)) ? String(mode) : 'auto';
+        const next = this.renderQualityMode === 'auto' ? this.renderScale
+            : Number(this.renderQualityMode);
+        this._qualitySlowSamples = 0;
+        this._qualityFastSamples = 0;
+        this._setRenderScale(next);
+    }
+
+    _setRenderScale(scale) {
+        const next = Math.max(0.5, Math.min(1, Number(scale) || 1));
+        if (Math.abs(next - this.renderScale) < 0.001) return false;
+        this.renderScale = next;
+        // 다음 frame에서 canvas와 object별 pen FBO를 같은 비율로 다시 만든다.
+        this.lastDrawAt = 0;
+        return true;
+    }
+
+    _updateAdaptiveQuality(metrics) {
+        if (this.renderQualityMode !== 'auto') return;
+        // 논리 계산이 긴 작품은 해상도를 내려도 빨라지지 않는다. rAF가 낮으면서
+        // 논리는 가벼운 경우 또는 WebGL 제출 자체가 긴 경우만 표시 병목으로 본다.
+        const gpuBound = metrics.renderMs > 7
+            || (metrics.rafHz > 0 && metrics.rafHz < 48 && metrics.logicMs < 10);
+        const plenty = metrics.rafHz >= 57 && metrics.logicMs < 8 && metrics.renderMs < 3;
+        this._qualitySlowSamples = gpuBound ? this._qualitySlowSamples + 1 : 0;
+        this._qualityFastSamples = plenty ? this._qualityFastSamples + 1 : 0;
+        if (this._qualitySlowSamples >= 4) {
+            this._setRenderScale(this.renderScale > 0.76 ? 0.75 : 0.5);
+            this._qualitySlowSamples = 0;
+            this._qualityFastSamples = 0;
+        } else if (this._qualityFastSamples >= 20 && this.renderScale < 1) {
+            this._setRenderScale(this.renderScale < 0.74 ? 0.75 : 1);
+            this._qualitySlowSamples = 0;
+            this._qualityFastSamples = 0;
+        }
+    }
 
     setMuted(muted) { this.sounds.setMuted(muted); }
 
@@ -1188,7 +1237,7 @@ export class EniwanRuntime {
 
     /** 표시 크기와 백킹스토어(devicePixelRatio)를 맞춘다. */
     _resizeBackingStore() {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2) * this.renderScale;
         const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
         const h = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
         const changed = this.canvas.width !== w || this.canvas.height !== h;
@@ -1298,6 +1347,7 @@ export class EniwanRuntime {
                 this.vm.texts = this.nativeRenderer.hud(this.nativeGame);
                 this.frameVertices = rs.vertices; this.frameTriangles = rs.triangles; this.frameDrawCalls = rs.drawCalls;
                 this.ticksRun += ticks; this.framesDrawn += 1;
+                if (ticks > 0) this.contentUpdates += 1;
                 this._sample(frameStart, logicEnd - logicStart, performance.now() - logicEnd, now);
                 if (this.hooks.onPaint) this.hooks.onPaint();
                 if (interactive && this.hooks.onInputFrame) this.hooks.onInputFrame();
@@ -1346,6 +1396,18 @@ export class EniwanRuntime {
         this._activePenObject = null;
         this._penBound = false;
         const logicStart = performance.now();
+            if ((this.dororongMode || this.axolotlMode)
+                && !this.vm.nativeContinuationsEnabled
+                && !this.vm.tickInProgress
+                && this.vm.stats.ticks > 30
+                && this.vm.stats.ticks !== this._lastContinuationTick) {
+                this._lastContinuationTick = this.vm.stats.ticks;
+                this._nativeSlowTickSamples = this.vm.stats.lastTickMs >= 20
+                    ? this._nativeSlowTickSamples + 1 : 0;
+                if (this._nativeSlowTickSamples >= 3) {
+                    this.vm.nativeContinuationsEnabled = true;
+                }
+            }
             // 티어 3은 한 틱 자체가 프레임 예산보다 길 수 있다. 밀린 틱을 한 rAF에서
             // 연달아 처리하면 합성 기회가 계속 밀려 계산 중인 빈 화면처럼 보인다.
             // A catch-up batch cannot change mouseDown halfway through. Keep
@@ -1394,6 +1456,7 @@ export class EniwanRuntime {
             if (previewPainted) {
                 this.lastDrawAt = now;
                 this.framesDrawn += 1;
+                this.contentUpdates += 1;
             } else if (this.spritePass && this.vm) {
                 this._clearCanvas();
                 const order = this.vm.drawOrder();
@@ -1506,11 +1569,16 @@ export class EniwanRuntime {
             m.contentUpdateHz = (this.contentUpdates * 1000) / sampleTime;
             m.rafHz = this.rafCalls > 0 ? (this.rafCalls * 1000) / sampleTime : 60;
             m.tickHz = this.ticksRun > 0 ? (this.ticksRun * 1000) / sampleTime : 60;
+            m.completedTickHz = m.tickHz;
+            m.renderScale = this.renderScale;
+            m.backingWidth = this.canvas?.width || 0;
+            m.backingHeight = this.canvas?.height || 0;
             this.framesDrawn = 0;
             this.contentUpdates = 0;
             this.rafCalls = 0;
             this.ticksRun = 0;
             this.lastSampleAt = now;
+            if (typeof this._updateAdaptiveQuality === 'function') this._updateAdaptiveQuality(m);
             if (this.hooks.onFrame) this.hooks.onFrame(m);
         }
     }

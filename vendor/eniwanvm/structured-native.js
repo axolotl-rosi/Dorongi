@@ -20,6 +20,10 @@ import {
 
 const isBlock = (value) => value && typeof value === 'object' && typeof value.type === 'string';
 const js = (value) => JSON.stringify(value);
+// Removed from the synchronous source and expanded to a generator yield in the
+// resumable variant. A comment marker cannot collide with Entry data literals
+// because those are JSON-escaped strings inside expressions.
+const SAFEPOINT = '/*__DORONGI_NATIVE_SAFEPOINT__*/';
 
 const unaryOperations = new Map([
     ['negative', UN_NEG], ['abs', UN_ABS], ['floor', UN_FLOOR],
@@ -88,6 +92,7 @@ export function compileStructuredFunction(fn, meta, environment) {
     let extended = false;
     let nativeLoop = false;
     let loopSerial = 0;
+    let resumableGeneration = false;
     let hasSelfInExpr = false;
     let hasNonTailSelf = false;
     const selfType = `func_${fn.id}`;
@@ -213,6 +218,9 @@ export function compileStructuredFunction(fn, meta, environment) {
         dependencies.add(target.index);
         const args = Array.from({ length: target.arity }, (_, i) => expression((node.params || [])[i] ?? 0));
         const suffix = args.length ? `,${args.join(',')}` : '';
+        if (resumableGeneration) {
+            return `(yield* v._nativeResumeCall(${target.index},e,[${args.join(',')}]))`;
+        }
         return `v._nativeCall${target.arity}(${target.index},e${suffix})`;
     };
 
@@ -434,7 +442,7 @@ export function compileStructuredFunction(fn, meta, environment) {
                 const test = until
                     ? `${numeric(p[0])}===0`
                     : `${numeric(p[0])}!==0`;
-                return `while(${test}){${statements(loopBody.slice(0, -1), loopDepth + 1, false)}}`;
+                return `while(${test}){${SAFEPOINT}${statements(loopBody.slice(0, -1), loopDepth + 1, false)}}`;
             }
             case 'repeat_basic': {
                 const loopBody = body[0] || [];
@@ -442,7 +450,7 @@ export function compileStructuredFunction(fn, meta, environment) {
                 nativeLoop = true;
                 extended = true;
                 const counter = `q${loopSerial++}`;
-                return `for(let ${counter}=${numeric(p[0])};${counter}>0;${counter}-=1){${statements(loopBody.slice(0, -1), loopDepth + 1, false)}}`;
+                return `for(let ${counter}=${numeric(p[0])};${counter}>0;${counter}-=1){${SAFEPOINT}${statements(loopBody.slice(0, -1), loopDepth + 1, false)}}`;
             }
             case 'wait_until_true':
                 if (isFastLoopTail(block)) return '';
@@ -470,8 +478,34 @@ export function compileStructuredFunction(fn, meta, environment) {
         const wrappedBody = canTco && recursive
             ? `__tco:for(;;){${numericParamInit}${locals}${body}${returnStatement}}`
             : `function self(v,e,d,${params.join(',')}){if(d>=v.maxCallDepth){v.stats.overruns+=1;return 0;}${numericParamInit}${locals}${body}${returnStatement}}return self(v,e,0${callArgs});`;
+        const markedSource = `function(v,e,${params.join(',')}){"use strict";${wrappedBody}}`;
+        const source = markedSource.replaceAll(SAFEPOINT, '');
+        // Non-recursive parents become generators as well, so a long leaf loop
+        // can yield through the complete native call chain instead of being
+        // hidden behind a synchronous _nativeCallN boundary.
+        const resumable = !recursive && (nativeLoop || dependencies.size > 0);
+        let resumableSource = null;
+        if (resumable) {
+            try {
+                resumableGeneration = true;
+                loopSerial = 0;
+                const resumableBody = (head.statements || [])
+                    .map((list) => statements(list, 0, true)).join('');
+                resumableSource = `function*(v,e,${params.join(',')}){"use strict";let fl=0;${numericParamInit}${locals}${resumableBody.replaceAll(
+                    SAFEPOINT,
+                    'if(((++fl)&255)===0&&v._nativeDeadlineReached())yield 0;',
+                )}${returnStatement}}`;
+            } catch {
+                // Synchronous native lowering remains valid even when the
+                // optional continuation variant cannot be generated.
+                resumableSource = null;
+            } finally {
+                resumableGeneration = false;
+            }
+        }
         return {
-            source: `function(v,e,${params.join(',')}){"use strict";${wrappedBody}}`,
+            source,
+            resumableSource,
             dependencies: [...dependencies],
             recursive,
             extended,

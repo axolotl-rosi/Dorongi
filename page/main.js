@@ -45,6 +45,7 @@ function sanitizeSettings(raw) {
         deviceType: pick(s.deviceType, ['auto', 'desktop', 'tablet', 'mobile'], 'auto'),
         touchMode: pick(s.touchMode, ['auto', 'on', 'off'], 'auto'),
         renderMode: pick(s.renderMode, ['auto', '60', '120', 'max'], 'auto'),
+        renderQuality: pick(s.renderQuality, ['auto', '1', '0.75', '0.5'], 'auto'),
         tessMode: pick(s.tessMode, ['auto', 'on', 'off'], 'auto'),
         dutMode: s.dutMode === true,
         dororongMode: s.dororongMode === true,

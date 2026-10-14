@@ -398,6 +398,8 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         touchMode: ['auto', 'on', 'off'].includes(settings.touchMode) ? settings.touchMode : 'auto',
         renderMode: ['auto', '60', '120', 'max'].includes(settings.renderMode)
             ? settings.renderMode : 'auto',
+        renderQuality: ['auto', '1', '0.75', '0.5'].includes(settings.renderQuality)
+            ? settings.renderQuality : 'auto',
         tessMode: ['auto', 'on', 'off'].includes(settings.tessMode) ? settings.tessMode : 'auto',
         dutMode: settings.dutMode === true,
         dororongMode: settings.dororongMode === true,
@@ -416,6 +418,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         const hz = current.renderMode === '60' ? 60 : current.renderMode === '120' ? 120 : 0;
         runtime?.setRenderHz(hz);
     };
+    const applyRenderQuality = () => runtime?.setRenderQuality(current.renderQuality);
     const isDororongActive = () => current.turbo > 1 || current.dororongMode;
     const syncDororongMode = () => {
         const active = isDororongActive();
@@ -440,6 +443,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             deviceType: current.deviceMode,
             touchMode: current.touchMode,
             renderMode: current.renderMode,
+            renderQuality: current.renderQuality,
             tessMode: current.tessMode,
             dutMode: current.dutMode,
             dororongMode: current.dororongMode,
@@ -529,6 +533,14 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             applyRenderMode();
             persistSettings();
         });
+    const renderQualitySelect = settingSelect(executionSettings, '렌더 품질',
+        '무대 크기는 유지하고 내부 렌더 해상도만 조절합니다. 자동은 GPU 표시 병목일 때 천천히 조절합니다.',
+        [['auto', '자동'], ['1', '선명 100%'], ['0.75', '균형 75%'], ['0.5', '성능 50%']],
+        current.renderQuality, (value) => {
+            current.renderQuality = value;
+            applyRenderQuality();
+            persistSettings();
+        });
 
     const volumeSetting = settingRange(executionSettings, '음량',
         '작품의 원래 음량에 적용되는 전체 출력 음량입니다.', current.volume, (value) => {
@@ -611,9 +623,11 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
 
     const diagnosticsSettings = settingsSection('진단', '실행 상태와 호환성');
     const diagnosticReadout = el('dl', 'ev-diagnostic-readout', diagnosticsSettings);
-    diagnosticReadout.innerHTML = '<div><dt>화면</dt><dd data-ev-diag="fps">—</dd></div>'
-        + '<div><dt>로직</dt><dd data-ev-diag="tick">—</dd></div>'
+    diagnosticReadout.innerHTML = '<div><dt>화면 제출</dt><dd data-ev-diag="fps">—</dd></div>'
+        + '<div><dt>내용 갱신</dt><dd data-ev-diag="content">—</dd></div>'
+        + '<div><dt>완료 로직</dt><dd data-ev-diag="tick">—</dd></div>'
         + '<div><dt>프레임</dt><dd data-ev-diag="frame">—</dd></div>'
+        + '<div><dt>렌더 해상도</dt><dd data-ev-diag="resolution">—</dd></div>'
         + '<div><dt>분석 티어</dt><dd data-ev-diag="tier">—</dd></div>'
         + '<div><dt>표시 면</dt><dd data-ev-diag="faces">—</dd></div>';
 
@@ -730,6 +744,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         current.computeLevel = recommendedComputeLevel(runtime?.analysis);
         current.turbo = 1;
         current.renderMode = 'auto';
+        current.renderQuality = 'auto';
         current.deviceMode = 'auto';
         current.touchMode = 'auto';
         current.boostMode = false;
@@ -741,6 +756,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         settingsCompute.value = '0';
         settingsTurbo.value = '1';
         renderModeSelect.value = 'auto';
+        renderQualitySelect.value = 'auto';
         deviceModeSelect.value = 'auto';
         touchModeSelect.value = 'auto';
         diagnosticsToggle.checked = false;
@@ -762,6 +778,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         runtime?.setTessCompatibility('auto');
         runtime?.setDutCompatibility(false);
         applyRenderMode();
+        applyRenderQuality();
         computeSelect?.select(current.computeLevel);
         speedSelect?.select(1);
         coverCompute?.select(current.computeLevel);
@@ -1042,6 +1059,11 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             frameMs: Number(m.frameMs.toFixed(1)),
             logicMs: Number(m.logicMs.toFixed(1)),
             renderMs: Number(m.renderMs.toFixed(1)),
+            contentUpdateHz: Math.round(m.contentUpdateHz || 0),
+            completedTickHz: Math.round(m.completedTickHz || m.tickHz || 0),
+            renderScale: Number(m.renderScale || 1),
+            backingWidth: Number(m.backingWidth || 0),
+            backingHeight: Number(m.backingHeight || 0),
             triangles: m.triangles,
             drawCalls: m.drawCalls,
             overruns: m.overruns,
@@ -1054,15 +1076,19 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
             budgetUsage: runtime?.stepBudget ? Math.min(1, m.stepsPerTick / runtime.stepBudget) : 0,
         };
         const diagFps = diagnosticReadout.querySelector('[data-ev-diag="fps"]');
+        const diagContent = diagnosticReadout.querySelector('[data-ev-diag="content"]');
         const diagTick = diagnosticReadout.querySelector('[data-ev-diag="tick"]');
         const diagFrame = diagnosticReadout.querySelector('[data-ev-diag="frame"]');
         const diagTier = diagnosticReadout.querySelector('[data-ev-diag="tier"]');
         const diagFaces = diagnosticReadout.querySelector('[data-ev-diag="faces"]');
+        const diagResolution = diagnosticReadout.querySelector('[data-ev-diag="resolution"]');
         if (diagFps) diagFps.textContent = `${Math.round(m.fps)} fps`;
+        if (diagContent) diagContent.textContent = `${Math.round(m.contentUpdateHz || 0)} fps`;
         if (diagTick) diagTick.textContent = `${Math.round(m.tickHz)} tps`;
         if (diagFrame) diagFrame.textContent = `${m.frameMs.toFixed(1)} ms`;
         if (diagTier) diagTier.textContent = `T${lastStats.tier || runtime?.analysis?.tier || '—'}`;
         if (diagFaces) diagFaces.textContent = fmtInt(m.triangles || 0);
+        if (diagResolution) diagResolution.textContent = `${m.backingWidth || 0}×${m.backingHeight || 0} · ${Math.round((m.renderScale || 1) * 100)}%`;
         // [사용자 요청] 자동 연산 규모 실시간 승격/수정 기능 비활성화 (computeSetting === 0 자동 모드에서도 동적 단계 승격 차단)
         if (false && runtime?.running && current.computeSetting === 0) {
             // 낮은 TPS만으로 단계를 올리지 않는다. 한 논리 tick을 여러 rAF로
@@ -1366,6 +1392,7 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
         });
         runtime.setComputeLevel(current.computeLevel);
         runtime.setTurbo(current.turbo);
+        runtime.setRenderQuality(current.renderQuality);
         runtime.setAxolotlMode(current.axolotlMode);
         syncDororongMode();
         runtime.setVolume(current.volume);
@@ -1635,6 +1662,11 @@ export function mountPlayer(host, projectId, groupId, settings, onFallback) {
                 current.renderMode = next.renderMode;
                 renderModeSelect.value = next.renderMode;
                 applyRenderMode();
+            }
+            if (next.renderQuality !== current.renderQuality) {
+                current.renderQuality = next.renderQuality;
+                renderQualitySelect.value = next.renderQuality;
+                applyRenderQuality();
             }
             if (next.deviceType !== current.deviceMode) {
                 current.deviceMode = next.deviceType;

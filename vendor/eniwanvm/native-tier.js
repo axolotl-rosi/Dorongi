@@ -226,6 +226,7 @@ export function buildNativeFunctions(program) {
         const product = structured
             ? {
                 source: structured,
+                resumableSource: functions[i].nativeResumableSource || null,
                 instructionCount: Math.max(1, end - functions[i].pc),
                 dependencies: functions[i].nativeDependencies || [],
             }
@@ -233,8 +234,19 @@ export function buildNativeFunctions(program) {
         if (!product) continue;
         try {
             const run = Function(`return (${product.source});`)();
+            let resumeFactory = null;
+            if (product.resumableSource) {
+                try {
+                    resumeFactory = Function(`return (${product.resumableSource});`)();
+                } catch {
+                    // Resumable compilation is an optional responsiveness layer.
+                    // Keep the verified synchronous native function as a safe fallback.
+                    resumeFactory = null;
+                }
+            }
             compiled[i] = {
                 run,
+                resumeFactory,
                 instructionCount: product.instructionCount,
                 source: product.source,
                 dependencies: product.dependencies || [],

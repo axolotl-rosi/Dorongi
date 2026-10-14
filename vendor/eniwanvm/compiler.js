@@ -2011,6 +2011,7 @@ export class Compiler {
                 },
             });
             meta.nativeSource = product?.source ?? null;
+            meta.nativeResumableSource = product?.resumableSource ?? null;
             meta.nativeDependencies = product?.dependencies ?? [];
             meta.nativeRecursive = product?.recursive ?? false;
             meta.nativeExtended = product?.extended ?? false;

@@ -213,6 +213,10 @@ export class EniwanVM {
         // 한 틱이 무한 루프로 브라우저를 얼리는 걸 막는 상한. 넘으면 그 틱을
         // 중단하고 `overrun`을 올린다 — 조용히 멈추는 대신 숫자로 드러낸다.
         this.maxStepsPerTick = options.maxStepsPerTick || 4_000_000;
+        // Generator continuations protect the display from genuinely long
+        // native loops, but generators are slower than plain native calls.
+        // The runtime promotes only repeatedly over-budget projects.
+        this.nativeContinuationsEnabled = options.nativeContinuations === true;
         this.memoCacheLimit = Math.max(0, Math.trunc(Number(options.memoCacheLimit) || 4_096));
         this.maxCallDepth = options.maxCallDepth || 2048;
         this.workDeadline = 0;
@@ -460,6 +464,9 @@ export class EniwanVM {
         this.rowBroadcastMessage = new Int32Array(cap).fill(-1);
         // 한 논리 틱을 여러 화면 프레임에 나눌 때 이미 끝난 줄을 표시한다.
         this.rowTickDone = new Uint8Array(cap);
+        // generator native의 지역 변수와 loop cursor. 줄마다 하나의 OP_CALL만
+        // 중단될 수 있으며 완료·reset·row 재사용 때 반드시 비운다.
+        this.nativeContinuations = new Array(cap).fill(null);
     }
 
     /**
@@ -479,6 +486,7 @@ export class EniwanVM {
             rowTurnStep: this.rowTurnStep, rowTurnFrames: this.rowTurnFrames,
             rowAwaitAnswer: this.rowAwaitAnswer,
             rowBroadcastMessage: this.rowBroadcastMessage,
+            nativeContinuations: this.nativeContinuations,
         };
         const cap = this.rowCapacity * 2;
         this._allocRows(cap);
@@ -502,6 +510,9 @@ export class EniwanVM {
         this.rowTurnFrames.set(old.rowTurnFrames);
         this.rowAwaitAnswer.set(old.rowAwaitAnswer);
         this.rowBroadcastMessage.set(old.rowBroadcastMessage);
+        for (let i = 0; i < old.nativeContinuations.length; i += 1) {
+            this.nativeContinuations[i] = old.nativeContinuations[i];
+        }
         this.rowCapacity = cap;
     }
 
@@ -651,6 +662,7 @@ export class EniwanVM {
         this.rowAwaitAnswer.fill(0);
         this.rowBroadcastMessage.fill(-1);
         this.rowTickDone.fill(0);
+        this.nativeContinuations.fill(null);
         this.rowCount = this.scriptCount;
         this._inTick = false;
         this.tickInProgress = false;
@@ -1248,6 +1260,13 @@ export class EniwanVM {
     _nativeCall15(index, entity, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14) { const n = this._nativeCallee(index); return n ? n.run(this, entity, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14) : 0; }
     _nativeCall16(index, entity, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15) { const n = this._nativeCallee(index); return n ? n.run(this, entity, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15) : 0; }
 
+    *_nativeResumeCall(index, entity, args) {
+        const native = this._nativeCallee(index);
+        if (!native) return 0;
+        if (native.resumeFactory) return yield* native.resumeFactory(this, entity, ...args);
+        return native.run(this, entity, ...args);
+    }
+
     _nativeInList(listIndex, value) {
         const needle = String(value);
         return this.lists[listIndex].some((item) => String(item) === needle) ? 1 : 0;
@@ -1775,7 +1794,11 @@ export class EniwanVM {
         }
         this.entIsClone[e] = 0;
         for (let i = 0; i < this.rowCount; i += 1) {
-            if (this.rowEntity[i] === e) { this.alive[i] = 0; this.rowSleep[i] = 0; }
+            if (this.rowEntity[i] === e) {
+                this.alive[i] = 0;
+                this.rowSleep[i] = 0;
+                this.nativeContinuations[i] = null;
+            }
         }
         const pen = this.pens[e];
         pen.filling = false;
@@ -1810,6 +1833,7 @@ export class EniwanVM {
         this.rowScript[row] = script;
         this.rowEntity[row] = entity;
         this.rowSleep[row] = 0;
+        this.nativeContinuations[row] = null;
         this.alive[row] = 1;
         // 틱 중에 깨운 줄은 **다음 틱**부터 돈다. 그래야 "몇 번째 줄이었나"에
         // 따라 같은 작품이 다르게 도는 일이 없다.
@@ -2542,12 +2566,50 @@ export class EniwanVM {
 
             case OP_CALL: {
                 const fn = this.program.functions[a];
-                if (this.callCounts) this.callCounts[a] += 1;
                     const native = this.nativeFunctions[a];
                     if (native) {
                         const arg = base + b;
                         const valueAt = (offset) => this._regValue(arg + offset);
                         let result;
+                        const callPc = pc - 1;
+                        let continuation = this.nativeContinuations[ti];
+                        if ((this.nativeContinuationsEnabled || continuation)
+                            && native.resumeFactory && (!continuation
+                            || (continuation.functionIndex === a
+                                && continuation.pc === callPc
+                                && continuation.base === base))) {
+                            if (!continuation) {
+                                const args = new Array(fn.arity);
+                                for (let i = 0; i < fn.arity; i += 1) args[i] = valueAt(i);
+                                continuation = {
+                                    functionIndex: a,
+                                    pc: callPc,
+                                    base,
+                                    iterator: native.resumeFactory(this, ent, ...args),
+                                };
+                                this.nativeContinuations[ti] = continuation;
+                                if (this.callCounts) this.callCounts[a] += 1;
+                                this.stats.calls += 1;
+                                this.stats.nativeCalls += 1;
+                                this.stats.nativeInstructions += native.instructionCount;
+                            }
+                            const resumed = continuation.iterator.next();
+                            if (!resumed.done) {
+                                this.pc[ti] = callPc;
+                                this.base[ti] = base;
+                                this.stats.budgetPauses += 1;
+                                return steps;
+                            }
+                            this.nativeContinuations[ti] = null;
+                            result = resumed.value;
+                            if (c >= 0) this._nativeStoreRegister(base + c,
+                                result === undefined ? 0 : result);
+                            break;
+                        }
+                        if (continuation) {
+                            throw new Error('EniwanVM: native continuation call site mismatch');
+                        }
+                        if (this.callCounts) this.callCounts[a] += 1;
                         switch (fn.arity) {
                                 case 0: result = native.run(this, ent); break;
                                 case 1: result = native.run(this, ent, valueAt(0)); break;
@@ -2608,7 +2670,13 @@ export class EniwanVM {
                 }
                 case OP_RET: {
                     const d = this.depth[ti] - 1;
-                    if (d < 0) { this.alive[ti] = 0; this.pc[ti] = pc; this.base[ti] = base; return steps; }
+                    if (d < 0) {
+                        this.alive[ti] = 0;
+                        this.nativeContinuations[ti] = null;
+                        this.pc[ti] = pc;
+                        this.base[ti] = base;
+                        return steps;
+                    }
                     const sp = (ti * this.maxCallDepth + d) * 3;
                     const retSlot = this.callStack[sp + 2];
                 const memoIndex = ti * this.maxCallDepth + d;
@@ -2823,6 +2891,7 @@ export class EniwanVM {
                             || (a === 4 && !sameObject);
                         if (stop) {
                             this.alive[row] = 0;
+                            this.nativeContinuations[row] = null;
                             if (row === ti) stoppedCurrent = true;
                         }
                     }
@@ -2832,6 +2901,7 @@ export class EniwanVM {
                 case OP_RESTART:
                     this.restartRequested = true;
                     this.alive[ti] = 0;
+                    this.nativeContinuations[ti] = null;
                     this.pc[ti] = pc;
                     return steps;
 
@@ -3078,6 +3148,7 @@ export class EniwanVM {
                     return steps;
                 case OP_HALT:
                     this.alive[ti] = 0;
+                    this.nativeContinuations[ti] = null;
                     this.pc[ti] = pc;
                     this.base[ti] = base;
                     return steps;
@@ -3119,6 +3190,18 @@ export class EniwanVM {
         try {
             while ((this.tickInProgress || this.accumulatorMs >= step || runAhead)
                 && chunks < maxTicks) {
+                if (!this.tickInProgress && ran > 0 && this.workDeadline > 0) {
+                    const beforeNext = typeof performance !== 'undefined'
+                        ? performance.now() : Date.now();
+                    const remaining = this.workDeadline - beforeNext;
+                    // A native call cannot always be interrupted in its middle. Do not
+                    // begin another full logical tick when its recent cost is likely to
+                    // consume the next presentation boundary. The 75% estimate still
+                    // permits useful batching on fast ticks while protecting slower Edge
+                    // executions from the old 30-40 ms frame bursts.
+                    const recentTickMs = Math.max(0.1, Number(this.stats.lastTickMs) || 0.1);
+                    if (remaining <= recentTickMs * 0.75 + 0.5) break;
+                }
                 if (!this.tickInProgress && this.accumulatorMs >= step) this.accumulatorMs -= step;
                 const result = this.runTickChunk();
                 if (result.complete) {
